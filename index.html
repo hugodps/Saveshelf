@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2B7871">
+<meta name="color-scheme" content="light dark">
+<title>Save Shelf</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--bg:#EEF2F0;--surface:#FFFFFF;--sunk:#E4EBE7;--ink:#16201D;--muted:#5B6863;--line:#CBD4D0;--accent:#2B7871;--accent-ink:#FFFFFF;--danger:#B3362B}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0F1513;--surface:#17201C;--sunk:#1D2925;--ink:#E2E9E5;--muted:#91A099;--line:#29352F;--accent:#5DB3AA;--accent-ink:#0F1513;--danger:#E0796E;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0F1513;--surface:#17201C;--sunk:#1D2925;--ink:#E2E9E5;--muted:#91A099;--line:#29352F;--accent:#5DB3AA;--accent-ink:#0F1513;--danger:#E0796E;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top,0px) 16px env(safe-area-inset-bottom,0px)}
+.wrap{max-width:640px;margin:0 auto;padding-block:20px 56px;display:flex;flex-direction:column;gap:18px}
+h1{font-size:28px;margin:0;letter-spacing:-.01em;line-height:1.1}
+h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 4px;font-weight:600}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}
+.eyebrow{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.muted{color:var(--muted)}
+.bar{display:flex;height:14px;border-radius:999px;overflow:hidden;background:var(--sunk);gap:2px;margin-bottom:12px}
+.bar span{min-width:6px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+input,select{font:inherit;color:var(--ink);background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0;width:100%}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>input{flex:1 1 200px;width:auto}
+.row>select{flex:0 1 160px;width:auto}
+button.primary{background:var(--accent);color:var(--accent-ink);border:0;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:none;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;cursor:pointer}
+.danger{color:var(--danger)!important}
+.group{display:flex;flex-direction:column;gap:10px}
+.group h2{display:flex;align-items:center;gap:8px}
+.posts{display:flex;flex-direction:column;gap:10px}
+.post{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.post.hl{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+.ptop{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px;color:var(--muted)}
+.ptop a{color:var(--accent);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.ptop time{white-space:nowrap}
+.note{margin:0;word-break:break-word}
+.pact{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pact select{width:auto;flex:1 1 150px;padding:7px 10px;font-size:13px}
+.empty{color:var(--muted);text-align:center;padding:32px 12px;border:1px dashed var(--line);border-radius:14px}
+.cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:14px 0}
+.catbtn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:12px;padding:14px;font:inherit;text-align:left;cursor:pointer;display:flex;align-items:center;gap:8px}
+.catbtn:focus-visible,button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.link{word-break:break-all;color:var(--accent);font-size:13px;display:block;margin-top:6px}
+.field{display:flex;flex-direction:column;gap:6px;margin-top:14px;font-size:13px;color:var(--muted)}
+.catlist{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+.catlist div{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
+details summary{cursor:pointer;font-weight:600;list-style-position:inside}
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center}
+#toast.on{opacity:1}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main class="wrap" id="app"></main>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+const KEY='saveshelf.v1';
+const DEFAULT_CATS=['Workout','Mobility','Recipe','Travel','Inspiration'];
+const UNC='Uncategorized';
+const IG=/https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[^\/\s?#]+\/)?(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i;
+const ANYURL=/https?:\/\/[^\s]+/;
+
+let db=load();
+let view='library', pending=null, filter='All', query='', highlight=null, armed=null;
+const app=document.getElementById('app');
+
+function load(){
+  try{const d=JSON.parse(localStorage.getItem(KEY)||'null');if(d&&Array.isArray(d.posts)&&Array.isArray(d.cats))return d}catch(e){}
+  return {cats:[...DEFAULT_CATS],posts:[]};
+}
+function persist(){
+  try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){toast('Could not save on this device')}
+}
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const colorFor=c=>{let h=0;for(const ch of c)h=(h*31+ch.charCodeAt(0))%360;return `hsl(${h} 45% 42%)`};
+const catList=()=>[...db.cats,UNC];
+const countBy=()=>{const m={};db.posts.forEach(p=>m[p.cat]=(m[p.cat]||0)+1);return m};
+const fmtDate=iso=>{try{return new Date(iso).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})}catch(e){return ''}};
+const label=url=>{const m=url.match(/\/(p|reel|tv)\/([^/?#]+)/);if(m)return `${m[1]} · ${m[2]}`;try{return new URL(url).hostname}catch(e){return url}};
+
+function findUrl(...parts){
+  for(const p of parts){const m=String(p||'').match(IG);if(m){const kind=m[1].toLowerCase()==='reels'?'reel':m[1].toLowerCase();return `https://www.instagram.com/${kind}/${m[2]}/`}}
+  for(const p of parts){const m=String(p||'').match(ANYURL);if(m)return m[0]}
+  return null;
+}
+
+let toastT;
+function toast(msg){
+  const t=document.getElementById('toast');t.textContent=msg;t.classList.add('on');
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2200);
+}
+
+function setView(v){
+  view=v;
+  if(v==='library'){highlight=highlight||null;try{history.replaceState(null,'',location.pathname)}catch(e){}}
+  renderAll();
+}
+
+function renderAll(){view==='save'?renderSave():renderLibrary()}
+
+function renderSave(){
+  const u=pending.url;
+  app.innerHTML=`
+    <section class="card">
+      <div class="eyebrow">Save to your shelf</div>
+      <a class="link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>
+      <label class="field"><span>Note (optional)</span>
+        <input id="note" maxlength="140" placeholder="e.g. 10-minute hip routine" value="${esc(pending.note)}"></label>
+      <div class="eyebrow" style="margin-top:14px">Choose a category</div>
+      <div class="cats">${catList().map(c=>`<button class="catbtn" data-pick="${esc(c)}"><span class="dot" style="background:${colorFor(c)}"></span>${esc(c)}</button>`).join('')}</div>
+      <button class="ghost" id="cancel">Cancel</button>
+    </section>`;
+}
+
+function renderLibrary(){
+  const cats=catList(),counts=countBy(),total=db.posts.length;
+  const used=cats.filter(c=>counts[c]);
+  app.innerHTML=`
+    <header>
+      <div class="eyebrow">${total} saved</div>
+      <h1>Save Shelf</h1>
+    </header>
+
+    <section class="card">
+      <h2>By category</h2>
+      ${total?`<div class="bar" role="img" aria-label="Posts per category">${used.map(c=>`<span style="flex:${counts[c]};background:${colorFor(c)}" title="${esc(c)}: ${counts[c]}"></span>`).join('')}</div>`:''}
+      <div class="chips">
+        <button class="chip" data-filter="All" aria-pressed="${filter==='All'}">All <span class="muted">${total}</span></button>
+        ${cats.map(c=>`<button class="chip" data-filter="${esc(c)}" aria-pressed="${filter===c}"><span class="dot" style="background:${colorFor(c)}"></span>${esc(c)} <span class="muted">${counts[c]||0}</span></button>`).join('')}
+      </div>
+    </section>
+
+    <section class="card">
+      <form id="addForm" class="row">
+        <input id="addUrl" type="url" inputmode="url" placeholder="Paste an Instagram link" aria-label="Instagram link">
+        <select id="addCat" aria-label="Category">${cats.map(c=>`<option>${esc(c)}</option>`).join('')}</select>
+        <button class="primary" type="submit">Add</button>
+      </form>
+    </section>
+
+    <input type="search" id="q" placeholder="Search notes, categories or links" value="${esc(query)}" aria-label="Search">
+
+    <div id="list"></div>
+
+    <details class="card">
+      <summary>Manage categories</summary>
+      <div class="catlist">${db.cats.map(c=>`<div><span><span class="dot" style="background:${colorFor(c)};display:inline-block;margin-right:8px"></span>${esc(c)} <span class="muted">${counts[c]||0}</span></span><button class="ghost danger" data-rmcat="${esc(c)}">Remove</button></div>`).join('')}
+        <div><span class="muted">${UNC} (always available)</span></div></div>
+      <form id="newCat" class="row">
+        <input id="catName" maxlength="24" placeholder="New category name" aria-label="New category name">
+        <button class="ghost" type="submit">Add category</button>
+      </form>
+    </details>
+
+    <section class="card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <span class="muted" style="flex:1 1 200px;font-size:13px">Your shelf is stored on this device. Export a backup to keep a copy.</span>
+      <button class="ghost" id="exportBtn">Export backup</button>
+      <button class="ghost" id="importBtn">Import backup</button>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    </section>`;
+  renderList();
+}
+
+function renderList(){
+  const el=document.getElementById('list');if(!el)return;
+  const cats=catList(),q=query.trim().toLowerCase();
+  let list=db.posts.filter(p=>(filter==='All'||p.cat===filter)&&(!q||(p.note+' '+p.url+' '+p.cat).toLowerCase().includes(q)));
+  if(!db.posts.length){el.innerHTML=`<div class="empty">Nothing saved yet.<br>Share an Instagram post to Save Shelf, or paste a link above.</div>`;return}
+  if(!list.length){el.innerHTML=`<div class="empty">No posts match.</div>`;return}
+  const card=p=>`
+    <article class="post${highlight===p.id?' hl':''}">
+      <div class="ptop"><a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(label(p.url))}</a><time>${fmtDate(p.added)}</time></div>
+      <p class="note${p.note?'':' muted'}">${esc(p.note||'No note')}</p>
+      <div class="pact">
+        <select data-move="${esc(p.id)}" aria-label="Move to category">${cats.map(c=>`<option${c===p.cat?' selected':''}>${esc(c)}</option>`).join('')}</select>
+        <button class="ghost danger" data-del="${esc(p.id)}">${armed===p.id?'Tap again to delete':'Delete'}</button>
+      </div>
+    </article>`;
+  if(filter==='All'&&!q){
+    el.innerHTML=`<div class="group">${cats.filter(c=>list.some(p=>p.cat===c)).map(c=>`
+      <div class="group"><h2><span class="dot" style="background:${colorFor(c)}"></span>${esc(c)} · ${list.filter(p=>p.cat===c).length}</h2>
+        <div class="posts">${list.filter(p=>p.cat===c).map(card).join('')}</div></div>`).join('')}</div>`;
+  }else{
+    el.innerHTML=`<div class="posts">${list.map(card).join('')}</div>`;
+  }
+}
+
+function commit(cat){
+  const note=(document.getElementById('note')?.value||'').trim();
+  const ex=db.posts.find(p=>p.url===pending.url);
+  if(ex){ex.cat=cat;if(note)ex.note=note;highlight=ex.id;toast(`Moved to ${cat}`)}
+  else{const id=uid();db.posts.unshift({id,url:pending.url,cat,note,added:new Date().toISOString()});highlight=id;toast(`Saved to ${cat}`)}
+  persist();pending=null;filter='All';setView('library');
+}
+
+function addLink(raw,cat){
+  const url=findUrl(raw);
+  if(!url){toast('That does not look like a link');return false}
+  const ex=db.posts.find(p=>p.url===url);
+  if(ex){ex.cat=cat;highlight=ex.id;toast(`Already saved, moved to ${cat}`)}
+  else{const id=uid();db.posts.unshift({id,url,cat,note:'',added:new Date().toISOString()});highlight=id;toast(`Saved to ${cat}`)}
+  persist();return true;
+}
+
+function init(){
+  const q=new URLSearchParams(location.search);
+  const title=q.get('title')||'';
+  const raw=[q.get('url'),q.get('text'),title];
+  const found=findUrl(...raw);
+  if(found){
+    const note=(title||q.get('text')||'').replace(ANYURL,'').replace(/\s+/g,' ').trim().slice(0,140);
+    pending={url:found,note};view='save';
+    try{history.replaceState(null,'',location.pathname)}catch(e){}
+  }else if(q.toString()){
+    toast('No link found in what you shared');
+    try{history.replaceState(null,'',location.pathname)}catch(e){}
+  }
+  renderAll();
+}
+
+document.addEventListener('click',e=>{
+  const t=e.target.closest('button');if(!t)return;
+  if(t.dataset.pick){commit(t.dataset.pick);return}
+  if(t.id==='cancel'){pending=null;setView('library');return}
+  if(t.dataset.filter){filter=t.dataset.filter;renderAll();return}
+  if(t.dataset.del){
+    const id=t.dataset.del;
+    if(armed===id){db.posts=db.posts.filter(p=>p.id!==id);armed=null;persist();toast('Deleted');renderAll()}
+    else{armed=id;renderList();setTimeout(()=>{if(armed===id){armed=null;renderList()}},4000)}
+    return;
+  }
+  if(t.dataset.rmcat){
+    const c=t.dataset.rmcat,n=countBy()[c]||0;
+    if(n){toast(`Move the ${n} post(s) out of ${c} first`);return}
+    db.cats=db.cats.filter(x=>x!==c);persist();renderAll();return;
+  }
+  if(t.id==='exportBtn'){
+    const blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='saveshelf-backup.json';document.body.appendChild(a);a.click();a.remove();
+    return;
+  }
+  if(t.id==='importBtn'){document.getElementById('importFile').click();return}
+});
+
+document.addEventListener('submit',e=>{
+  e.preventDefault();
+  if(e.target.id==='addForm'){
+    const url=document.getElementById('addUrl').value,cat=document.getElementById('addCat').value;
+    if(addLink(url,cat)){filter='All';renderAll()}
+  }
+  if(e.target.id==='newCat'){
+    const name=document.getElementById('catName').value.trim();
+    if(!name){toast('Enter a name');return}
+    if(name===UNC||db.cats.some(c=>c.toLowerCase()===name.toLowerCase())){toast('That category already exists');return}
+    db.cats.push(name);persist();renderAll();
+  }
+});
+
+document.addEventListener('change',e=>{
+  if(e.target.dataset&&e.target.dataset.move){
+    const p=db.posts.find(x=>x.id===e.target.dataset.move);
+    if(p){p.cat=e.target.value;persist();toast(`Moved to ${p.cat}`);renderAll()}
+    return;
+  }
+  if(e.target.id==='importFile'){
+    const f=e.target.files[0];if(!f)return;
+    const r=new FileReader();
+    r.onload=()=>{
+      try{
+        const d=JSON.parse(r.result);if(!Array.isArray(d.posts))throw new Error('bad');
+        let n=0;
+        (d.cats||[]).forEach(c=>{if(c!==UNC&&!db.cats.includes(c))db.cats.push(c)});
+        d.posts.forEach(p=>{if(p&&p.url&&!db.posts.some(x=>x.url===p.url)){db.posts.push({id:p.id||uid(),url:p.url,cat:p.cat||UNC,note:p.note||'',added:p.added||new Date().toISOString()});n++}});
+        persist();toast(`Imported ${n} new post(s)`);renderAll();
+      }catch(err){toast('That file is not a Save Shelf backup')}
+    };
+    r.readAsText(f);e.target.value='';
+  }
+});
+
+document.addEventListener('input',e=>{
+  if(e.target.id==='q'){query=e.target.value;renderList()}
+});
+
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}))}
+init();
+</script>
+</body>
+</html>
