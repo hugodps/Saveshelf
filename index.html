@@ -21,6 +21,7 @@ h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}
 .eyebrow{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .muted{color:var(--muted)}
+.small{font-size:12px}
 .bar{display:flex;height:14px;border-radius:999px;overflow:hidden;background:var(--sunk);gap:2px;margin-bottom:12px}
 .bar span{min-width:6px}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
@@ -32,25 +33,33 @@ input,select{font:inherit;color:var(--ink);background:var(--sunk);border:1px sol
 .row>input{flex:1 1 200px;width:auto}
 .row>select{flex:0 1 160px;width:auto}
 button.primary{background:var(--accent);color:var(--accent-ink);border:0;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer}
-button.ghost{background:none;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;cursor:pointer}
+.ghost{background:none;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;cursor:pointer;display:inline-flex;align-items:center}
 .danger{color:var(--danger)!important}
 .group{display:flex;flex-direction:column;gap:10px}
 .group h2{display:flex;align-items:center;gap:8px}
 .posts{display:flex;flex-direction:column;gap:10px}
-.post{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.post{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
 .post.hl{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+.prow{display:flex;gap:12px;min-width:0}
+.thumb{flex:none;width:88px;height:88px;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:var(--sunk);padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--ink);font:600 11px/1 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase}
+.thumb img{width:100%;height:100%;object-fit:cover;object-position:top;display:block}
+.pmain{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
 .ptop{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px;color:var(--muted)}
 .ptop a{color:var(--accent);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .ptop time{white-space:nowrap}
 .note{margin:0;word-break:break-word}
 .pact{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.pact select{width:auto;flex:1 1 150px;padding:7px 10px;font-size:13px}
+.pact select{width:auto;flex:1 1 130px;padding:7px 10px;font-size:13px}
+.embed{display:flex;flex-direction:column;gap:6px}
+.embed iframe{width:100%;height:540px;border:0;border-radius:10px;background:var(--sunk)}
 .empty{color:var(--muted);text-align:center;padding:32px 12px;border:1px dashed var(--line);border-radius:14px}
 .cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:14px 0}
 .catbtn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:12px;padding:14px;font:inherit;text-align:left;cursor:pointer;display:flex;align-items:center;gap:8px}
-.catbtn:focus-visible,button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.catbtn:focus-visible,button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,label.ghost:focus-within{outline:2px solid var(--accent);outline-offset:2px}
 .link{word-break:break-all;color:var(--accent);font-size:13px;display:block;margin-top:6px}
 .field{display:flex;flex-direction:column;gap:6px;margin-top:14px;font-size:13px;color:var(--muted)}
+.savethumb{display:flex;gap:12px;align-items:center;margin-top:14px}
+.savethumb img{width:64px;height:64px;object-fit:cover;object-position:top;border-radius:8px;border:1px solid var(--line)}
 .catlist{display:flex;flex-direction:column;gap:6px;margin:12px 0}
 .catlist div{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
 details summary{cursor:pointer;font-weight:600;list-style-position:inside}
@@ -70,9 +79,12 @@ const IG=/https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[^\/\s?#]+\/)?(p|reel|reel
 const ANYURL=/https?:\/\/[^\s]+/;
 
 let db=load();
-let view='library', pending=null, filter='All', query='', highlight=null, armed=null;
+let view='library', pending=null, filter='All', query='', highlight=null, armed=null, thumbTarget=null;
+const thumbs={};            // post id -> small JPEG data URL (kept in IndexedDB)
+const openEmbeds=new Set(); // post ids whose inline preview is open
 const app=document.getElementById('app');
 
+/* ---------- storage ---------- */
 function load(){
   try{const d=JSON.parse(localStorage.getItem(KEY)||'null');if(d&&Array.isArray(d.posts)&&Array.isArray(d.cats))return d}catch(e){}
   return {cats:[...DEFAULT_CATS],posts:[]};
@@ -80,6 +92,38 @@ function load(){
 function persist(){
   try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){toast('Could not save on this device')}
 }
+const idb=(()=>{
+  let p;
+  const open=()=>p||(p=new Promise((res,rej)=>{
+    const r=indexedDB.open('saveshelf',1);
+    r.onupgradeneeded=()=>r.result.createObjectStore('thumbs');
+    r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);
+  }));
+  return {
+    async put(k,v){const d=await open();return new Promise((res,rej)=>{const t=d.transaction('thumbs','readwrite');t.objectStore('thumbs').put(v,k);t.oncomplete=()=>res();t.onerror=()=>rej(t.error)})},
+    async del(k){const d=await open();return new Promise((res,rej)=>{const t=d.transaction('thumbs','readwrite');t.objectStore('thumbs').delete(k);t.oncomplete=()=>res();t.onerror=()=>rej(t.error)})},
+    async all(){const d=await open();return new Promise((res,rej)=>{const o={};const c=d.transaction('thumbs').objectStore('thumbs').openCursor();c.onsuccess=()=>{const cur=c.result;if(cur){o[cur.key]=cur.value;cur.continue()}else res(o)};c.onerror=()=>rej(c.error)})}
+  };
+})();
+function downscale(file,max=360){
+  return new Promise((res,rej)=>{
+    const img=new Image(),url=URL.createObjectURL(file);
+    img.onload=()=>{
+      const s=Math.min(1,max/Math.max(img.width,img.height)),c=document.createElement('canvas');
+      c.width=Math.max(1,Math.round(img.width*s));c.height=Math.max(1,Math.round(img.height*s));
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);
+      res(c.toDataURL('image/jpeg',0.75));
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('image'))};
+    img.src=url;
+  });
+}
+function keepThumb(id,dataUrl){
+  thumbs[id]=dataUrl;
+  idb.put(id,dataUrl).catch(()=>toast('Image kept for this visit only'));
+}
+
+/* ---------- helpers ---------- */
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const colorFor=c=>{let h=0;for(const ch of c)h=(h*31+ch.charCodeAt(0))%360;return `hsl(${h} 45% 42%)`};
@@ -87,6 +131,8 @@ const catList=()=>[...db.cats,UNC];
 const countBy=()=>{const m={};db.posts.forEach(p=>m[p.cat]=(m[p.cat]||0)+1);return m};
 const fmtDate=iso=>{try{return new Date(iso).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})}catch(e){return ''}};
 const label=url=>{const m=url.match(/\/(p|reel|tv)\/([^/?#]+)/);if(m)return `${m[1]} · ${m[2]}`;try{return new URL(url).hostname}catch(e){return url}};
+const kindOf=url=>{const m=url.match(/\/(p|reel|tv)\//);return m?(m[1]==='p'?'Post':m[1]==='reel'?'Reel':'Video'):'Link'};
+const embedUrl=u=>{const m=u.match(/instagram\.com\/(p|reel|tv)\/([^/?#]+)/);return m?`https://www.instagram.com/${m[1]}/${m[2]}/embed/`:null};
 
 function findUrl(...parts){
   for(const p of parts){const m=String(p||'').match(IG);if(m){const kind=m[1].toLowerCase()==='reels'?'reel':m[1].toLowerCase();return `https://www.instagram.com/${kind}/${m[2]}/`}}
@@ -97,17 +143,17 @@ function findUrl(...parts){
 let toastT;
 function toast(msg){
   const t=document.getElementById('toast');t.textContent=msg;t.classList.add('on');
-  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2200);
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2400);
 }
 
 function setView(v){
   view=v;
-  if(v==='library'){highlight=highlight||null;try{history.replaceState(null,'',location.pathname)}catch(e){}}
+  if(v==='library'){try{history.replaceState(null,'',location.pathname)}catch(e){}}
   renderAll();
 }
-
 function renderAll(){view==='save'?renderSave():renderLibrary()}
 
+/* ---------- save screen (after a share) ---------- */
 function renderSave(){
   const u=pending.url;
   app.innerHTML=`
@@ -116,12 +162,17 @@ function renderSave(){
       <a class="link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>
       <label class="field"><span>Note (optional)</span>
         <input id="note" maxlength="140" placeholder="e.g. 10-minute hip routine" value="${esc(pending.note)}"></label>
+      <div class="savethumb">
+        <img id="savePrev" alt="Screenshot preview"${pending.thumb?` src="${pending.thumb}"`:' hidden'}>
+        <label class="ghost">Add a screenshot (optional)<input type="file" id="saveThumb" accept="image/*" hidden></label>
+      </div>
       <div class="eyebrow" style="margin-top:14px">Choose a category</div>
       <div class="cats">${catList().map(c=>`<button class="catbtn" data-pick="${esc(c)}"><span class="dot" style="background:${colorFor(c)}"></span>${esc(c)}</button>`).join('')}</div>
       <button class="ghost" id="cancel">Cancel</button>
     </section>`;
 }
 
+/* ---------- library ---------- */
 function renderLibrary(){
   const cats=catList(),counts=countBy(),total=db.posts.length;
   const used=cats.filter(c=>counts[c]);
@@ -151,6 +202,7 @@ function renderLibrary(){
     <input type="search" id="q" placeholder="Search notes, categories or links" value="${esc(query)}" aria-label="Search">
 
     <div id="list"></div>
+    <input type="file" id="thumbFile" accept="image/*" hidden>
 
     <details class="card">
       <summary>Manage categories</summary>
@@ -163,12 +215,34 @@ function renderLibrary(){
     </details>
 
     <section class="card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <span class="muted" style="flex:1 1 200px;font-size:13px">Your shelf is stored on this device. Export a backup to keep a copy.</span>
+      <span class="muted" style="flex:1 1 200px;font-size:13px">Your shelf and images are stored on this device. Export a backup to keep a copy.</span>
       <button class="ghost" id="exportBtn">Export backup</button>
       <button class="ghost" id="importBtn">Import backup</button>
       <input type="file" id="importFile" accept="application/json,.json" hidden>
     </section>`;
   renderList();
+}
+
+function postCard(p,cats){
+  const img=thumbs[p.id],col=colorFor(p.cat),emb=embedUrl(p.url),open=openEmbeds.has(p.id);
+  return `
+    <article class="post${highlight===p.id?' hl':''}">
+      <div class="prow">
+        <button class="thumb" data-preview="${esc(p.id)}" aria-label="${open?'Hide':'Show'} preview"${emb?'':' disabled'}>${img?`<img src="${img}" alt="">`:`<span style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;background:color-mix(in srgb,${col} 22%,var(--sunk))">${esc(kindOf(p.url))}</span>`}</button>
+        <div class="pmain">
+          <div class="ptop"><a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(label(p.url))}</a><time>${fmtDate(p.added)}</time></div>
+          <p class="note${p.note?'':' muted'}">${esc(p.note||'No note')}</p>
+        </div>
+      </div>
+      <div class="pact">
+        <select data-move="${esc(p.id)}" aria-label="Move to category">${cats.map(c=>`<option${c===p.cat?' selected':''}>${esc(c)}</option>`).join('')}</select>
+        ${emb?`<button class="ghost" data-preview="${esc(p.id)}">${open?'Hide preview':'Preview'}</button>`:''}
+        <button class="ghost" data-addimg="${esc(p.id)}">${img?'Change image':'Add image'}</button>
+        <button class="ghost danger" data-del="${esc(p.id)}">${armed===p.id?'Tap again to delete':'Delete'}</button>
+      </div>
+      ${open&&emb?`<div class="embed"><iframe src="${esc(emb)}" loading="lazy" title="Instagram preview" allowtransparency="true"></iframe>
+        <span class="muted small">Nothing showing? The post may be private, or your browser may block the preview. <a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open it on Instagram</a>.</span></div>`:''}
+    </article>`;
 }
 
 function renderList(){
@@ -177,30 +251,24 @@ function renderList(){
   let list=db.posts.filter(p=>(filter==='All'||p.cat===filter)&&(!q||(p.note+' '+p.url+' '+p.cat).toLowerCase().includes(q)));
   if(!db.posts.length){el.innerHTML=`<div class="empty">Nothing saved yet.<br>Share an Instagram post to Save Shelf, or paste a link above.</div>`;return}
   if(!list.length){el.innerHTML=`<div class="empty">No posts match.</div>`;return}
-  const card=p=>`
-    <article class="post${highlight===p.id?' hl':''}">
-      <div class="ptop"><a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(label(p.url))}</a><time>${fmtDate(p.added)}</time></div>
-      <p class="note${p.note?'':' muted'}">${esc(p.note||'No note')}</p>
-      <div class="pact">
-        <select data-move="${esc(p.id)}" aria-label="Move to category">${cats.map(c=>`<option${c===p.cat?' selected':''}>${esc(c)}</option>`).join('')}</select>
-        <button class="ghost danger" data-del="${esc(p.id)}">${armed===p.id?'Tap again to delete':'Delete'}</button>
-      </div>
-    </article>`;
   if(filter==='All'&&!q){
     el.innerHTML=`<div class="group">${cats.filter(c=>list.some(p=>p.cat===c)).map(c=>`
       <div class="group"><h2><span class="dot" style="background:${colorFor(c)}"></span>${esc(c)} · ${list.filter(p=>p.cat===c).length}</h2>
-        <div class="posts">${list.filter(p=>p.cat===c).map(card).join('')}</div></div>`).join('')}</div>`;
+        <div class="posts">${list.filter(p=>p.cat===c).map(p=>postCard(p,cats)).join('')}</div></div>`).join('')}</div>`;
   }else{
-    el.innerHTML=`<div class="posts">${list.map(card).join('')}</div>`;
+    el.innerHTML=`<div class="posts">${list.map(p=>postCard(p,cats)).join('')}</div>`;
   }
 }
 
+/* ---------- actions ---------- */
 function commit(cat){
   const note=(document.getElementById('note')?.value||'').trim();
   const ex=db.posts.find(p=>p.url===pending.url);
-  if(ex){ex.cat=cat;if(note)ex.note=note;highlight=ex.id;toast(`Moved to ${cat}`)}
-  else{const id=uid();db.posts.unshift({id,url:pending.url,cat,note,added:new Date().toISOString()});highlight=id;toast(`Saved to ${cat}`)}
-  persist();pending=null;filter='All';setView('library');
+  let id;
+  if(ex){ex.cat=cat;if(note)ex.note=note;id=ex.id;toast(`Moved to ${cat}`)}
+  else{id=uid();db.posts.unshift({id,url:pending.url,cat,note,added:new Date().toISOString()});toast(`Saved to ${cat}`)}
+  if(pending.thumb)keepThumb(id,pending.thumb);
+  highlight=id;persist();pending=null;filter='All';setView('library');
 }
 
 function addLink(raw,cat){
@@ -215,17 +283,17 @@ function addLink(raw,cat){
 function init(){
   const q=new URLSearchParams(location.search);
   const title=q.get('title')||'';
-  const raw=[q.get('url'),q.get('text'),title];
-  const found=findUrl(...raw);
+  const found=findUrl(q.get('url'),q.get('text'),title);
   if(found){
     const note=(title||q.get('text')||'').replace(ANYURL,'').replace(/\s+/g,' ').trim().slice(0,140);
-    pending={url:found,note};view='save';
+    pending={url:found,note,thumb:null};view='save';
     try{history.replaceState(null,'',location.pathname)}catch(e){}
   }else if(q.toString()){
     toast('No link found in what you shared');
     try{history.replaceState(null,'',location.pathname)}catch(e){}
   }
   renderAll();
+  idb.all().then(o=>{Object.assign(thumbs,o);if(view==='library')renderList()}).catch(()=>{});
 }
 
 document.addEventListener('click',e=>{
@@ -233,10 +301,18 @@ document.addEventListener('click',e=>{
   if(t.dataset.pick){commit(t.dataset.pick);return}
   if(t.id==='cancel'){pending=null;setView('library');return}
   if(t.dataset.filter){filter=t.dataset.filter;renderAll();return}
+  if(t.dataset.preview){
+    const id=t.dataset.preview;
+    openEmbeds.has(id)?openEmbeds.delete(id):openEmbeds.add(id);
+    renderList();return;
+  }
+  if(t.dataset.addimg){thumbTarget=t.dataset.addimg;document.getElementById('thumbFile').click();return}
   if(t.dataset.del){
     const id=t.dataset.del;
-    if(armed===id){db.posts=db.posts.filter(p=>p.id!==id);armed=null;persist();toast('Deleted');renderAll()}
-    else{armed=id;renderList();setTimeout(()=>{if(armed===id){armed=null;renderList()}},4000)}
+    if(armed===id){
+      db.posts=db.posts.filter(p=>p.id!==id);delete thumbs[id];openEmbeds.delete(id);idb.del(id).catch(()=>{});
+      armed=null;persist();toast('Deleted');renderAll();
+    }else{armed=id;renderList();setTimeout(()=>{if(armed===id){armed=null;renderList()}},4000)}
     return;
   }
   if(t.dataset.rmcat){
@@ -245,7 +321,7 @@ document.addEventListener('click',e=>{
     db.cats=db.cats.filter(x=>x!==c);persist();renderAll();return;
   }
   if(t.id==='exportBtn'){
-    const blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'});
+    const blob=new Blob([JSON.stringify({...db,thumbs},null,2)],{type:'application/json'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='saveshelf-backup.json';document.body.appendChild(a);a.click();a.remove();
     return;
   }
@@ -266,25 +342,47 @@ document.addEventListener('submit',e=>{
   }
 });
 
-document.addEventListener('change',e=>{
-  if(e.target.dataset&&e.target.dataset.move){
-    const p=db.posts.find(x=>x.id===e.target.dataset.move);
-    if(p){p.cat=e.target.value;persist();toast(`Moved to ${p.cat}`);renderAll()}
+document.addEventListener('change',async e=>{
+  const el=e.target;
+  if(el.dataset&&el.dataset.move){
+    const p=db.posts.find(x=>x.id===el.dataset.move);
+    if(p){p.cat=el.value;persist();toast(`Moved to ${p.cat}`);renderAll()}
     return;
   }
-  if(e.target.id==='importFile'){
-    const f=e.target.files[0];if(!f)return;
+  if(el.id==='thumbFile'){
+    const f=el.files[0];el.value='';if(!f||!thumbTarget)return;
+    try{keepThumb(thumbTarget,await downscale(f));toast('Image added');renderList()}
+    catch(err){toast('Could not read that image')}
+    return;
+  }
+  if(el.id==='saveThumb'){
+    const f=el.files[0];el.value='';if(!f||!pending)return;
+    try{
+      pending.thumb=await downscale(f);
+      const img=document.getElementById('savePrev');img.src=pending.thumb;img.hidden=false;
+    }catch(err){toast('Could not read that image')}
+    return;
+  }
+  if(el.id==='importFile'){
+    const f=el.files[0];if(!f)return;
     const r=new FileReader();
     r.onload=()=>{
       try{
         const d=JSON.parse(r.result);if(!Array.isArray(d.posts))throw new Error('bad');
         let n=0;
         (d.cats||[]).forEach(c=>{if(c!==UNC&&!db.cats.includes(c))db.cats.push(c)});
-        d.posts.forEach(p=>{if(p&&p.url&&!db.posts.some(x=>x.url===p.url)){db.posts.push({id:p.id||uid(),url:p.url,cat:p.cat||UNC,note:p.note||'',added:p.added||new Date().toISOString()});n++}});
+        d.posts.forEach(p=>{
+          if(p&&p.url&&!db.posts.some(x=>x.url===p.url)){
+            const id=p.id||uid();
+            db.posts.push({id,url:p.url,cat:p.cat||UNC,note:p.note||'',added:p.added||new Date().toISOString()});
+            if(d.thumbs&&d.thumbs[p.id])keepThumb(id,d.thumbs[p.id]);
+            n++;
+          }
+        });
         persist();toast(`Imported ${n} new post(s)`);renderAll();
       }catch(err){toast('That file is not a Save Shelf backup')}
     };
-    r.readAsText(f);e.target.value='';
+    r.readAsText(f);el.value='';
   }
 });
 
