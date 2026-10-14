@@ -76,6 +76,8 @@ button.primary{background:var(--accent);color:var(--accent-ink);border:0;border-
 .catlist div{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
 details summary{cursor:pointer;font-weight:600;list-style-position:inside}
 details>*:not(summary){margin-top:12px}
+.notice{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap;background:color-mix(in srgb,var(--accent) 14%,var(--surface));border:1px solid var(--accent);border-radius:12px;padding:10px 14px;font-size:14px}
+.notice>span:first-child{flex:1 1 200px;min-width:0;word-break:break-word}
 #toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center;z-index:10}
 #toast.on{opacity:1}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -90,13 +92,13 @@ const SKEY='saveshelf.settings.v1';
 const DEFAULT_CATS=['Workout','Mobility','Recipe','Travel','Inspiration'];
 const UNC='Uncategorized';
 const MODEL='claude-haiku-5-5';
-const APP_VERSION='4 · 14 Oct 2026';
+const APP_VERSION='5 · 14 Oct 2026';
 const IG=/https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[^\/\s?#]+\/)?(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i;
 const ANYURL=/https?:\/\/[^\s]+/;
 
 let db=load();
 let settings=loadSettings();
-let view='library', pending=null, attachImg=null, filter='All', query='', highlight=null, armed=null, thumbTarget=null, editing=null;
+let view='library', pending=null, attachImg=null, filter='All', query='', highlight=null, armed=null, thumbTarget=null, editing=null, notice=null;
 const thumbs={};            // post id -> JPEG data URL (kept in IndexedDB)
 const openEmbeds=new Set(); // post ids whose inline preview is open
 const busy=new Set();       // post ids waiting for a suggestion
@@ -302,6 +304,7 @@ function renderLibrary(){
       <div class="eyebrow">${total} saved</div>
       <h1>Save Shelf</h1>
     </header>
+    ${notice?`<div class="notice" role="status"><span>${esc(notice.text)}</span><span class="row">${notice.undo?'<button class="ghost" data-undo="1">Undo</button>':''}<button class="ghost" data-dismiss="1">OK</button></span></div>`:''}
 
     <section class="card">
       <h2>By category</h2>
@@ -411,7 +414,10 @@ function commit(cat){
   const ex=db.posts.find(p=>p.url===pending.url);
   let id;
   if(ex){ex.cat=cat;if(title)ex.title=title;if(note)ex.note=note;id=ex.id;toast(`Moved to ${cat}`)}
-  else{id=uid();db.posts.unshift({id,url:pending.url,cat,title,note,added:new Date().toISOString()});toast(`Saved to ${cat}`)}
+  else{
+    id=uid();db.posts.unshift({id,url:pending.url,cat,title,note,added:new Date().toISOString()});
+    toast(hasKey()&&settings.auto&&!pending.thumb?`Saved to ${cat}. Share a screenshot of the post to add its picture and name.`:`Saved to ${cat}`);
+  }
   if(pending.thumb)keepThumb(id,pending.thumb);
   highlight=id;persist();pending=null;filter='All';setView('library');
 }
@@ -423,6 +429,27 @@ function addLink(raw,cat){
   if(ex){ex.cat=cat;highlight=ex.id;toast(`Already saved, moved to ${cat}`)}
   else{const id=uid();db.posts.unshift({id,url,cat,title:'',note:'',added:new Date().toISOString()});highlight=id;toast(`Saved to ${cat}`)}
   persist();return true;
+}
+
+// Attaches a shared screenshot to a post, names it, and files it if it was left uncategorised.
+async function autoAttach(post,img){
+  const before={title:post.title||'',note:post.note||'',cat:post.cat,prevThumb:thumbs[post.id]||null};
+  keepThumb(post.id,img);
+  let text;
+  try{
+    const s=await suggestMeta(img);
+    if(!post.title)post.title=s.title;
+    if(!post.note)post.note=s.description;
+    if(post.cat===UNC&&s.category)post.cat=s.category;
+    text=`Added the picture and named it “${nameOf(post)}”`+(post.cat!==before.cat?`, filed under ${post.cat}`:'');
+  }catch(err){text='Picture added. '+errMsg(err)}
+  persist();highlight=post.id;filter='All';
+  notice={text,undo:()=>{
+    post.title=before.title;post.note=before.note;post.cat=before.cat;
+    if(before.prevThumb)keepThumb(post.id,before.prevThumb);
+    else{delete thumbs[post.id];idb.del(post.id).catch(()=>{})}
+    persist();
+  }};
 }
 
 async function suggestForPost(id){
@@ -442,6 +469,7 @@ async function init(){
   const q=new URLSearchParams(location.search);
   const title=q.get('title')||'';
   const found=findUrl(q.get('url'),q.get('text'),title);
+  const thumbsReady=idb.all().then(o=>{Object.assign(thumbs,o)}).catch(()=>{});
   let shared=null;
   if(q.get('shared')==='image'){
     const blob=await takeSharedImage();
@@ -451,14 +479,22 @@ async function init(){
     const note=(title||q.get('text')||'').replace(ANYURL,'').replace(/\s+/g,' ').trim().slice(0,140);
     pending={url:found,title:'',note,thumb:shared,suggestCat:null};view='save';
   }else if(shared){
-    attachImg=shared;view='attach';
+    try{history.replaceState(null,'',location.pathname)}catch(e){}
+    await thumbsReady;
+    // A screenshot that arrives soon after a link was saved belongs to that post.
+    const recent=db.posts.find(p=>!thumbs[p.id]&&Date.now()-Date.parse(p.added)<3600000);
+    if(recent&&hasKey()&&settings.auto){
+      app.innerHTML='<section class="card"><div class="eyebrow">Screenshot received</div><p>Reading the screenshot…</p></section>';
+      await autoAttach(recent,shared);
+      view='library';
+    }else{attachImg=shared;view='attach'}
   }else if(q.toString()){
     toast('No link or image found in what you shared');
   }
   if(q.toString()){try{history.replaceState(null,'',location.pathname)}catch(e){}}
   renderAll();
   if(view==='save'&&pending.thumb&&hasKey()&&settings.auto)runSuggestPending();
-  idb.all().then(o=>{Object.assign(thumbs,o);if(view==='library')renderList();else if(view==='attach')renderAttach()}).catch(()=>{});
+  thumbsReady.then(()=>{if(view==='library')renderList();else if(view==='attach')renderAttach()});
 }
 
 document.addEventListener('click',e=>{
@@ -466,6 +502,8 @@ document.addEventListener('click',e=>{
   if(t.dataset.pick){commit(t.dataset.pick);return}
   if(t.id==='cancel'){pending=null;attachImg=null;setView('library');return}
   if(t.id==='suggestBtn'){runSuggestPending();return}
+  if(t.dataset.undo){if(notice&&notice.undo)notice.undo();notice=null;toast('Undone');renderAll();return}
+  if(t.dataset.dismiss){notice=null;renderAll();return}
   if(t.dataset.attach){attachTo(t.dataset.attach);return}
   if(t.dataset.filter){filter=t.dataset.filter;renderAll();return}
   if(t.dataset.preview){

@@ -1,4 +1,4 @@
-const CACHE = 'saveshelf-v4';
+const CACHE = 'saveshelf-v5';
 const SHARE_CACHE = 'saveshelf-share';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
