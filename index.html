@@ -90,6 +90,7 @@ const SKEY='saveshelf.settings.v1';
 const DEFAULT_CATS=['Workout','Mobility','Recipe','Travel','Inspiration'];
 const UNC='Uncategorized';
 const MODEL='claude-haiku-5-5';
+const APP_VERSION='4 · 14 Oct 2026';
 const IG=/https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[^\/\s?#]+\/)?(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i;
 const ANYURL=/https?:\/\/[^\s]+/;
 
@@ -350,7 +351,8 @@ function renderLibrary(){
       <button class="ghost" id="exportBtn">Export backup</button>
       <button class="ghost" id="importBtn">Import backup</button>
       <input type="file" id="importFile" accept="application/json,.json" hidden>
-    </section>`;
+    </section>
+    <p class="muted small" style="text-align:center;margin:0">Save Shelf version ${APP_VERSION}</p>`;
   renderList();
 }
 
@@ -574,7 +576,16 @@ document.addEventListener('input',e=>{
   if(e.target.id==='q'){query=e.target.value;renderList()}
 });
 
-if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}))}
+if('serviceWorker' in navigator){
+  const hadController=!!navigator.serviceWorker.controller;
+  let reloaded=false;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{
+    // A new version took over. Reload once, but only if nothing is being typed.
+    if(!hadController||reloaded||view!=='library'||editing)return;
+    reloaded=true;location.reload();
+  });
+  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{}));
+}
 init();
 </script>
 </body>

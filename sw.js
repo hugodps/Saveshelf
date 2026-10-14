@@ -1,4 +1,4 @@
-const CACHE = 'saveshelf-v3';
+const CACHE = 'saveshelf-v4';
 const SHARE_CACHE = 'saveshelf-share';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
@@ -51,7 +51,7 @@ self.addEventListener('fetch', e => {
 
   // Pages come from the network when online, from the cache when offline.
   if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).catch(() => caches.match('./index.html')));
+    e.respondWith(fetch(req, { cache: 'no-store' }).catch(() => caches.match('./index.html')));
     return;
   }
 
