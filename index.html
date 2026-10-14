@@ -28,7 +28,8 @@ h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute
 .chip{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;display:inline-flex;gap:6px;align-items:center;cursor:pointer}
 .chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
-input,select{font:inherit;color:var(--ink);background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0;width:100%}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0;width:100%}
+textarea{resize:vertical}
 .row{display:flex;gap:8px;flex-wrap:wrap}
 .row>input{flex:1 1 200px;width:auto}
 .row>select{flex:0 1 160px;width:auto}
@@ -92,7 +93,7 @@ const SKEY='saveshelf.settings.v1';
 const DEFAULT_CATS=['Workout','Mobility','Recipe','Travel','Inspiration'];
 const UNC='Uncategorized';
 const MODEL='claude-haiku-5-5';
-const APP_VERSION='6 · 14 Oct 2026';
+const APP_VERSION='7 · 14 Oct 2026';
 const IG=/https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[^\/\s?#]+\/)?(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i;
 const ANYURL=/https?:\/\/[^\s]+/;
 
@@ -192,20 +193,24 @@ function fail(code){const e=new Error(code);e.code=code;return e}
 const errMsg=e=>({nokey:'Add your API key under Smart naming first',auth:'The API key was rejected. Check it under Smart naming',net:'Could not reach the API. Check your connection',http:'The API returned an error. Try again later',parse:'Could not read the suggestion. Try again',unreadable:'Instagram did not let the app read this post'}[e&&e.code]||'Could not get a suggestion');
 
 async function suggestMeta(dataUrl){
+  return askMeta([{type:'image',source:{type:'base64',media_type:'image/jpeg',data:dataUrl.split(',')[1]}}],'This is a screenshot of an Instagram post or reel');
+}
+async function suggestFromCaption(text){
+  return askMeta([{type:'text',text:'Caption text:\n---\n'+text.slice(0,3000)+'\n---'}],'Below is the caption of an Instagram post or reel',true);
+}
+async function askMeta(parts,intro,textOnly){
   if(!hasKey())throw fail('nokey');
-  const prompt=`This is a screenshot of an Instagram post or reel that someone saved so they can find it again later. Reply with JSON only and no other text, in this shape: {"title":"...","description":"...","category":"..."}.
-title: a clear name for the post, at most 8 words, in the language of the on-screen text.
+  const prompt=`${intro} that someone saved so they can find it again later. Reply with JSON only and no other text, in this shape: {"title":"...","description":"...","category":"..."}.
+title: a clear name for the post, at most 8 words, in the language of the ${textOnly?'caption':'on-screen text'}.
 description: one or two short sentences, at most 160 characters, saying what it shows or teaches, with any visible key details such as exercise names, ingredients or place names.
 category: the best match from this list: ${catList().join(', ')}.
-Use only what is visible. Do not guess names or facts.`;
+Use only what is ${textOnly?'in the caption':'visible'}. Do not guess names or facts.`;
   let res;
   try{
     res=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{'content-type':'application/json','x-api-key':settings.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:MODEL,max_tokens:300,messages:[{role:'user',content:[
-        {type:'image',source:{type:'base64',media_type:'image/jpeg',data:dataUrl.split(',')[1]}},
-        {type:'text',text:prompt}]}]})
+      body:JSON.stringify({model:MODEL,max_tokens:300,messages:[{role:'user',content:[...parts,{type:'text',text:prompt}]}]})
     });
   }catch(e){throw fail('net')}
   if(res.status===401||res.status===403)throw fail('auth');
@@ -282,6 +287,12 @@ function renderSave(){
         <input id="title" maxlength="80" placeholder="e.g. 10-minute hip mobility routine" value="${esc(pending.title)}"></label>
       <label class="field"><span>Description (optional)</span>
         <input id="note" maxlength="200" placeholder="What is it about?" value="${esc(pending.note)}"></label>
+      <label class="field"><span>Caption (paste it to name the post automatically)</span>
+        <textarea id="caption" rows="3" maxlength="3000" placeholder="In Instagram, long-press the caption to copy it, then paste here">${esc(pending.caption||'')}</textarea></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button type="button" class="ghost" id="pasteCap">Paste caption</button>
+        <button type="button" class="ghost" id="capBtn"${hasKey()?'':' hidden'}>Name it from caption</button>
+      </div>
       <div class="savethumb">
         <img id="savePrev" alt="Screenshot preview"${pending.thumb?` src="${pending.thumb}"`:' hidden'}>
         <div class="col">
@@ -314,9 +325,29 @@ async function runReadLink(){
     settings.stats.fail++;settings.stats.last=err.reason||err.code||'failed';persistSettings();
     if(!pending||pending.url!==url)return;
     if(status())status().textContent=err.code==='unreadable'
-      ?'Instagram did not let the app read this post. Save it, then share a screenshot to add its name and picture.'
+      ?'Instagram did not let the app read this post. Paste the caption below to name it, or save it and share a screenshot later for the picture.'
       :errMsg(err);
   }
+}
+
+async function runCaption(){
+  const ta=document.getElementById('caption');if(!ta||!pending)return;
+  const text=ta.value.trim();pending.caption=text;
+  if(text.length<8){toast('Paste the caption first');return}
+  if(!hasKey()){toast(errMsg(fail('nokey')));return}
+  const btn=document.getElementById('capBtn');
+  if(btn){btn.disabled=true;btn.textContent='Reading the caption…'}
+  try{
+    const s=await suggestFromCaption(text);
+    const t=document.getElementById('title'),n=document.getElementById('note');
+    if(t&&!t.value.trim())t.value=s.title;
+    if(n&&!n.value.trim())n.value=s.description;
+    if(pending)pending.suggestCat=s.category;
+    document.querySelectorAll('.catbtn').forEach(b=>b.classList.toggle('sug',!!s.category&&b.dataset.pick===s.category));
+    toast(s.category?`Named from the caption. Category: ${s.category}`:'Named from the caption');
+  }catch(err){toast(errMsg(err))}
+  const b2=document.getElementById('capBtn');
+  if(b2){b2.disabled=false;b2.textContent='Name it from caption'}
 }
 
 async function runSuggestPending(){
@@ -471,7 +502,7 @@ function postCard(p,cats){
 function renderList(){
   const el=document.getElementById('list');if(!el)return;
   const cats=catList(),q=query.trim().toLowerCase();
-  let list=db.posts.filter(p=>(filter==='All'||p.cat===filter)&&(!q||((p.title||'')+' '+(p.note||'')+' '+p.url+' '+p.cat).toLowerCase().includes(q)));
+  let list=db.posts.filter(p=>(filter==='All'||p.cat===filter)&&(!q||((p.title||'')+' '+(p.note||'')+' '+(p.caption||'')+' '+p.url+' '+p.cat).toLowerCase().includes(q)));
   if(!db.posts.length){el.innerHTML=`<div class="empty">Nothing saved yet.<br>Share an Instagram post to Save Shelf, or paste a link above.</div>`;return}
   if(!list.length){el.innerHTML=`<div class="empty">No posts match.</div>`;return}
   if(filter==='All'&&!q){
@@ -489,9 +520,9 @@ function commit(cat){
   const note=(document.getElementById('note')?.value||'').trim();
   const ex=db.posts.find(p=>p.url===pending.url);
   let id;
-  if(ex){ex.cat=cat;if(title)ex.title=title;if(note)ex.note=note;id=ex.id;toast(`Moved to ${cat}`)}
+  if(ex){ex.cat=cat;if(title)ex.title=title;if(note)ex.note=note;if(pending.caption)ex.caption=pending.caption.slice(0,1500);id=ex.id;toast(`Moved to ${cat}`)}
   else{
-    id=uid();db.posts.unshift({id,url:pending.url,cat,title,note,added:new Date().toISOString()});
+    id=uid();db.posts.unshift({id,url:pending.url,cat,title,note,caption:(pending.caption||'').slice(0,1500),added:new Date().toISOString()});
     toast(hasKey()&&settings.auto&&!pending.thumb?`Saved to ${cat}. Share a screenshot of the post to add its picture and name.`:`Saved to ${cat}`);
   }
   if(pending.thumb)keepThumb(id,pending.thumb);
@@ -579,6 +610,14 @@ document.addEventListener('click',e=>{
   if(t.dataset.pick){commit(t.dataset.pick);return}
   if(t.id==='cancel'){pending=null;attachImg=null;setView('library');return}
   if(t.id==='suggestBtn'){runSuggestPending();return}
+  if(t.id==='capBtn'){runCaption();return}
+  if(t.id==='pasteCap'){
+    (async()=>{
+      try{const x=await navigator.clipboard.readText();if(!x.trim()){toast('Clipboard is empty');return}
+        document.getElementById('caption').value=x.slice(0,3000);
+        if(hasKey()&&settings.auto)runCaption();else toast('Caption pasted')}
+      catch(err){const ta=document.getElementById('caption');if(ta)ta.focus();toast('Long-press the box and choose Paste')}
+    })();return}
   if(t.dataset.undo){if(notice&&notice.undo)notice.undo();notice=null;toast('Undone');renderAll();return}
   if(t.dataset.dismiss){notice=null;renderAll();return}
   if(t.dataset.attach){attachTo(t.dataset.attach);return}
@@ -688,8 +727,13 @@ document.addEventListener('change',async e=>{
   }
 });
 
+document.addEventListener('paste',e=>{
+  if(e.target.id==='caption'&&hasKey()&&settings.auto)setTimeout(runCaption,50);
+});
+
 document.addEventListener('input',e=>{
   if(e.target.id==='q'){query=e.target.value;renderList()}
+  if(e.target.id==='caption'&&pending)pending.caption=e.target.value;
 });
 
 if('serviceWorker' in navigator){
