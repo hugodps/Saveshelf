@@ -99,7 +99,7 @@ const SKEY='saveshelf.settings.v1';
 const DEFAULT_CATS=['Workout','Mobility','Recipe','Travel','Inspiration'];
 const UNC='Uncategorized';
 const MODEL='claude-haiku-5-5';
-const APP_VERSION='9 · 14 Oct 2026';
+const APP_VERSION='10 · 14 Oct 2026';
 const IG=/https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[^\/\s?#]+\/)?(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i;
 const ANYURL=/https?:\/\/[^\s]+/;
 
@@ -174,7 +174,17 @@ const countBy=()=>{const m={};db.posts.forEach(p=>m[p.cat]=(m[p.cat]||0)+1);retu
 const fmtDate=iso=>{try{return new Date(iso).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})}catch(e){return ''}};
 const label=url=>{const m=url.match(/\/(p|reel|tv)\/([^/?#]+)/);if(m)return `${m[1]} · ${m[2]}`;try{return new URL(url).hostname}catch(e){return url}};
 const kindOf=url=>{const m=url.match(/\/(p|reel|tv)\//);return m?(m[1]==='p'?'Post':m[1]==='reel'?'Reel':'Video'):'Link'};
-const embedUrl=u=>{const m=u.match(/instagram\.com\/(p|reel|tv)\/([^/?#]+)/);return m?`https://www.instagram.com/${m[1]}/${m[2]}/embed/`:null};
+const embedUrl=u=>{
+  const m=u.match(/instagram\.com\/(p|reel|tv)\/([^/?#]+)/);
+  if(m)return `https://www.instagram.com/${m[1]}/${m[2]}/embed/`;
+  const clean=u.replace(/^(https?:\/\/)(?:m|mbasic|web)\.facebook\.com/i,'$1www.facebook.com');
+  if(/^https?:\/\/fb\.watch\//i.test(clean)||/^https?:\/\/(?:www\.)?facebook\.com\/(?:reel\/|watch|share\/[rv]\/|[^/?#]+\/videos\/|video\.php|videos\/)/i.test(clean))
+    return `https://www.facebook.com/plugins/video.php?show_text=false&t=0&href=${encodeURIComponent(clean)}`;
+  if(/^https?:\/\/(?:www\.)?facebook\.com\//i.test(clean))
+    return `https://www.facebook.com/plugins/post.php?show_text=true&width=500&href=${encodeURIComponent(clean)}`;
+  return null;
+};
+const siteOf=u=>/facebook\.com|fb\.watch/i.test(u)?'Facebook':'Instagram';
 const nameOf=p=>p.title||(p.kind==='media'?(p.mtype==='video'?'Video':'Photo'):label(p.url));
 const hasKey=()=>!!(settings.apiKey&&settings.apiKey.length>20);
 
@@ -561,8 +571,8 @@ function postCard(p,cats){
                 <button class="ghost danger" data-del="${esc(p.id)}">${armed===p.id?'Tap again to delete':'Delete'}</button>
       </div>
       ${p.kind==='media'?(mUrl(p.id)?`<div class="embed">${p.mtype==='video'?`<video class="mprev" src="${mUrl(p.id)}" controls playsinline preload="metadata"></video>`:`<img class="mprev" src="${mUrl(p.id)}" alt="${esc(nameOf(p))}" loading="lazy">`}</div>`:'<span class="muted small">Loading…</span>'):''}
-      ${emb?`<div class="embed"><iframe src="${esc(emb)}" loading="lazy" title="Instagram preview" allowtransparency="true"></iframe>
-        <span class="muted small">Nothing showing? The post may be private, or your browser may block the preview. <a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open it on Instagram</a>.</span></div>`:''}
+      ${emb?`<div class="embed"><iframe src="${esc(emb)}" loading="lazy" title="${siteOf(p.url)} preview" allowtransparency="true"></iframe>
+        <span class="muted small">Nothing showing? The post may be private, or your browser may block the preview. <a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open it on ${siteOf(p.url)}</a>.</span></div>`:''}
     </article>`;
 }
 
