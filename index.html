@@ -99,7 +99,7 @@ const SKEY='saveshelf.settings.v1';
 const DEFAULT_CATS=['Workout','Mobility','Recipe','Travel','Inspiration'];
 const UNC='Uncategorized';
 const MODEL='claude-haiku-5-5';
-const APP_VERSION='10 · 14 Oct 2026';
+const APP_VERSION='11 · 14 Oct 2026';
 const IG=/https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[^\/\s?#]+\/)?(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i;
 const ANYURL=/https?:\/\/[^\s]+/;
 
@@ -553,6 +553,7 @@ function postCard(p,cats){
         <form class="editform" data-edit-form="${esc(p.id)}">
           <input name="title" maxlength="80" placeholder="Title" value="${esc(p.title||'')}" aria-label="Title">
           <input name="note" maxlength="200" placeholder="Description" value="${esc(p.note||'')}" aria-label="Description">
+          ${p.kind==='media'?'':`<input name="url" type="url" inputmode="url" placeholder="Link" value="${esc(p.url)}" aria-label="Link">`}
           <div class="pact"><button class="primary" type="submit">Save</button><button class="ghost" type="button" data-edit-cancel="1">Cancel</button></div>
         </form>`:`
         <div class="pmain">
@@ -572,7 +573,8 @@ function postCard(p,cats){
       </div>
       ${p.kind==='media'?(mUrl(p.id)?`<div class="embed">${p.mtype==='video'?`<video class="mprev" src="${mUrl(p.id)}" controls playsinline preload="metadata"></video>`:`<img class="mprev" src="${mUrl(p.id)}" alt="${esc(nameOf(p))}" loading="lazy">`}</div>`:'<span class="muted small">Loading…</span>'):''}
       ${emb?`<div class="embed"><iframe src="${esc(emb)}" loading="lazy" title="${siteOf(p.url)} preview" allowtransparency="true"></iframe>
-        <span class="muted small">Nothing showing? The post may be private, or your browser may block the preview. <a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open it on ${siteOf(p.url)}</a>.</span></div>`:''}
+        <span class="muted small">Nothing showing? The post may be private, or your browser may block the preview. <a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open it on ${siteOf(p.url)}</a>.</span>
+        ${/facebook\.com\/share\//i.test(p.url)?`<span class="muted small">This is a Facebook share link, and Facebook's preview often cannot open those. Open it, copy the full address from the browser bar, then tap Edit here and replace the link.</span>`:''}</div>`:''}
     </article>`;
 }
 
@@ -765,7 +767,9 @@ document.addEventListener('submit',e=>{
   }
   if(f.dataset&&f.dataset.editForm){
     const p=db.posts.find(x=>x.id===f.dataset.editForm);
-    if(p){const d=new FormData(f);p.title=String(d.get('title')||'').trim();p.note=String(d.get('note')||'').trim();persist();toast('Saved')}
+    if(p){const d=new FormData(f);p.title=String(d.get('title')||'').trim();p.note=String(d.get('note')||'').trim();
+      if(p.kind!=='media'&&d.has('url')){const nu=findUrl(d.get('url'));if(nu&&nu!==p.url&&!db.posts.some(x=>x!==p&&x.url===nu))p.url=nu}
+      persist();toast('Saved')}
     editing=null;renderList();
   }
 });
