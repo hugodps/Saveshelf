@@ -92,7 +92,7 @@ const SKEY='saveshelf.settings.v1';
 const DEFAULT_CATS=['Workout','Mobility','Recipe','Travel','Inspiration'];
 const UNC='Uncategorized';
 const MODEL='claude-haiku-5-5';
-const APP_VERSION='5 · 14 Oct 2026';
+const APP_VERSION='6 · 14 Oct 2026';
 const IG=/https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[^\/\s?#]+\/)?(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i;
 const ANYURL=/https?:\/\/[^\s]+/;
 
@@ -113,7 +113,7 @@ function persist(){
   try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){toast('Could not save on this device')}
 }
 function loadSettings(){
-  try{return {apiKey:'',auto:true,...JSON.parse(localStorage.getItem(SKEY)||'{}')}}catch(e){return {apiKey:'',auto:true}}
+  try{return {apiKey:'',auto:true,readLink:true,stats:{ok:0,fail:0,last:''},...JSON.parse(localStorage.getItem(SKEY)||'{}')}}catch(e){return {apiKey:'',auto:true,readLink:true,stats:{ok:0,fail:0,last:''}}}
 }
 function persistSettings(){try{localStorage.setItem(SKEY,JSON.stringify(settings))}catch(e){toast('Could not save settings')}}
 
@@ -189,7 +189,7 @@ function renderAll(){view==='save'?renderSave():view==='attach'?renderAttach():r
 
 /* ---------- smart naming (optional, uses the viewer's own API key) ---------- */
 function fail(code){const e=new Error(code);e.code=code;return e}
-const errMsg=e=>({nokey:'Add your API key under Smart naming first',auth:'The API key was rejected. Check it under Smart naming',net:'Could not reach the API. Check your connection',http:'The API returned an error. Try again later',parse:'Could not read the suggestion. Try again'}[e&&e.code]||'Could not get a suggestion');
+const errMsg=e=>({nokey:'Add your API key under Smart naming first',auth:'The API key was rejected. Check it under Smart naming',net:'Could not reach the API. Check your connection',http:'The API returned an error. Try again later',parse:'Could not read the suggestion. Try again',unreadable:'Instagram did not let the app read this post'}[e&&e.code]||'Could not get a suggestion');
 
 async function suggestMeta(dataUrl){
   if(!hasKey())throw fail('nokey');
@@ -221,6 +221,55 @@ Use only what is visible. Do not guess names or facts.`;
   };
 }
 
+// Experimental: asks Claude to fetch the post's public page and describe it.
+// Instagram may refuse, so every failure is reported and nothing is lost.
+async function readLink(url){
+  if(!hasKey())throw fail('nokey');
+  const m=url.match(/instagram\.com\/(p|reel|tv)\/([^/?#]+)/);
+  const embed=m?`https://www.instagram.com/${m[1]}/${m[2]}/embed/captioned/`:url;
+  const prompt=`Someone saved this Instagram post so they can find it again later. Fetch the page and describe it.
+Page 1: ${embed}
+Page 2: ${url}
+Use only text that the fetched pages actually contain. If the pages show a login screen, an error, or no caption or description, reply exactly {"readable":false}. Do not guess from the web address.
+Otherwise reply with JSON only: {"readable":true,"title":"...","description":"...","category":"..."}.
+title: a clear name, at most 8 words, in the language of the caption.
+description: one or two short sentences, at most 160 characters.
+category: the best match from this list: ${catList().join(', ')}.`;
+  const messages=[{role:'user',content:prompt}];
+  let j=null;
+  for(let i=0;i<3;i++){
+    let res;
+    try{
+      res=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',
+        headers:{'content-type':'application/json','x-api-key':settings.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+        body:JSON.stringify({model:MODEL,max_tokens:400,messages,tools:[{type:'web_fetch_20250910',name:'web_fetch',max_uses:2,max_content_tokens:4000,allowed_domains:['www.instagram.com']}]})
+      });
+    }catch(e){throw fail('net')}
+    if(res.status===401)throw fail('auth');
+    if(!res.ok){
+      let msg='';try{msg=((await res.json()).error||{}).message||''}catch(e){}
+      const e=fail('http');e.reason=`http ${res.status}${msg?': '+msg.slice(0,90):''}`;throw e;
+    }
+    try{j=await res.json()}catch(e){throw fail('parse')}
+    if(j.stop_reason==='pause_turn'){messages.push({role:'assistant',content:j.content});continue}
+    break;
+  }
+  let reason='';
+  for(const b of (j&&j.content)||[]){
+    if(b.type==='web_fetch_tool_result'&&b.content&&b.content.type==='web_fetch_tool_result_error')reason=b.content.error_code||'fetch error';
+  }
+  const texts=((j&&j.content)||[]).filter(b=>b.type==='text').map(b=>b.text||'').reverse();
+  let o=null;
+  for(const t of texts){const mm=t.match(/\{[\s\S]*\}/);if(mm){try{o=JSON.parse(mm[0]);break}catch(e){}}}
+  if(!o||!o.readable||!(o.title||o.description)){const e=fail('unreadable');e.reason=reason||'no readable text';throw e}
+  return {
+    title:String(o.title||'').trim().slice(0,80),
+    description:String(o.description||'').trim().slice(0,200),
+    category:catList().includes(o.category)?o.category:null
+  };
+}
+
 /* ---------- save screen (after a link is shared) ---------- */
 function renderSave(){
   const u=pending.url;
@@ -228,6 +277,7 @@ function renderSave(){
     <section class="card">
       <div class="eyebrow">Save to your shelf</div>
       <a class="link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>
+      <p class="muted small" id="linkStatus" aria-live="polite" style="margin:6px 0 0"></p>
       <label class="field"><span>Title (optional)</span>
         <input id="title" maxlength="80" placeholder="e.g. 10-minute hip mobility routine" value="${esc(pending.title)}"></label>
       <label class="field"><span>Description (optional)</span>
@@ -243,6 +293,30 @@ function renderSave(){
       <div class="cats">${catList().map(c=>`<button class="catbtn${pending.suggestCat===c?' sug':''}" data-pick="${esc(c)}"><span class="dot" style="background:${colorFor(c)}"></span>${esc(c)}</button>`).join('')}</div>
       <button class="ghost" id="cancel">Cancel</button>
     </section>`;
+}
+
+async function runReadLink(){
+  if(!pending||!hasKey()||!settings.auto||!settings.readLink||!IG.test(pending.url))return;
+  const status=()=>document.getElementById('linkStatus');
+  const url=pending.url;
+  if(status())status().textContent='Reading the post from its link…';
+  try{
+    const s=await readLink(url);
+    settings.stats.ok++;settings.stats.last='worked';persistSettings();
+    if(!pending||pending.url!==url)return;
+    const t=document.getElementById('title'),n=document.getElementById('note');
+    if(t&&!t.value.trim())t.value=s.title;
+    if(n&&!n.value.trim())n.value=s.description;
+    pending.suggestCat=s.category;
+    document.querySelectorAll('.catbtn').forEach(b=>b.classList.toggle('sug',!!s.category&&b.dataset.pick===s.category));
+    if(status())status().textContent='Filled in from the link. Check it before saving.';
+  }catch(err){
+    settings.stats.fail++;settings.stats.last=err.reason||err.code||'failed';persistSettings();
+    if(!pending||pending.url!==url)return;
+    if(status())status().textContent=err.code==='unreadable'
+      ?'Instagram did not let the app read this post. Save it, then share a screenshot to add its name and picture.'
+      :errMsg(err);
+  }
 }
 
 async function runSuggestPending(){
@@ -330,13 +404,15 @@ function renderLibrary(){
 
     <details class="card">
       <summary>Smart naming (optional)</summary>
-      <p class="muted small">Reads a screenshot and suggests a title, a short description and a category. It uses your own Anthropic API key, which stays in this browser only. The screenshot is sent to Anthropic when you use it. Create a key with a low spending limit at console.anthropic.com.</p>
+      <p class="muted small">Reads a screenshot and suggests a title, a short description and a category. It uses your own Anthropic API key, which stays in this browser only. Screenshots and links are sent to Anthropic when you use it. Create a key with a low spending limit at console.anthropic.com.</p>
       <form id="keyForm" class="row">
         <input id="apiKey" type="password" autocomplete="off" placeholder="${hasKey()?'Key saved. Paste a new one to replace it':'Paste your API key'}" aria-label="API key">
         <button class="ghost" type="submit">Save key</button>
       </form>
       ${hasKey()?`<div class="row" style="align-items:center"><span class="muted small">Key ending ${esc(settings.apiKey.slice(-4))}</span><button class="ghost danger" id="clearKey">Remove key</button></div>`:''}
       <label class="check"><input type="checkbox" id="autoSuggest"${settings.auto?' checked':''}> Suggest automatically when a screenshot is added</label>
+      <label class="check"><input type="checkbox" id="readLinkChk"${settings.readLink?' checked':''}> Try to read shared links automatically (experimental)</label>
+      <p class="muted small">Link reading so far: ${settings.stats.ok} worked, ${settings.stats.fail} failed${settings.stats.fail&&settings.stats.last&&settings.stats.last!=='worked'?`. Last problem: ${esc(settings.stats.last)}`:''}. Instagram often refuses automatic reading, so the screenshot method stays available.</p>
     </details>
 
     <details class="card">
@@ -494,6 +570,7 @@ async function init(){
   if(q.toString()){try{history.replaceState(null,'',location.pathname)}catch(e){}}
   renderAll();
   if(view==='save'&&pending.thumb&&hasKey()&&settings.auto)runSuggestPending();
+  else if(view==='save'&&!pending.thumb)runReadLink();
   thumbsReady.then(()=>{if(view==='library')renderList();else if(view==='attach')renderAttach()});
 }
 
@@ -571,6 +648,7 @@ document.addEventListener('change',async e=>{
     return;
   }
   if(el.id==='autoSuggest'){settings.auto=el.checked;persistSettings();return}
+  if(el.id==='readLinkChk'){settings.readLink=el.checked;persistSettings();return}
   if(el.id==='thumbFile'){
     const f=el.files[0];el.value='';if(!f||!thumbTarget)return;
     try{keepThumb(thumbTarget,await downscale(f));toast('Image added');renderList()}
