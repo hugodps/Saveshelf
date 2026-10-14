@@ -59,6 +59,8 @@ button.primary{background:var(--accent);color:var(--accent-ink);border:0;border-
 .tile{border:1px solid var(--line);border-top:4px solid var(--c);background:var(--surface);color:var(--ink);border-radius:14px;padding:14px;font:inherit;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:4px;min-height:96px}
 .tile strong{font-size:17px}
 .tl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mprev{width:100%;max-height:70vh;border-radius:10px;background:#000;object-fit:contain;display:block}
+[hidden]{display:none!important}
 .embed iframe{width:100%;height:540px;border:0;border-radius:10px;background:var(--sunk)}
 .empty{color:var(--muted);text-align:center;padding:32px 12px;border:1px dashed var(--line);border-radius:14px}
 .cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:14px 0}
@@ -97,13 +99,16 @@ const SKEY='saveshelf.settings.v1';
 const DEFAULT_CATS=['Workout','Mobility','Recipe','Travel','Inspiration'];
 const UNC='Uncategorized';
 const MODEL='claude-haiku-5-5';
-const APP_VERSION='8 · 14 Oct 2026';
+const APP_VERSION='9 · 14 Oct 2026';
 const IG=/https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[^\/\s?#]+\/)?(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i;
 const ANYURL=/https?:\/\/[^\s]+/;
 
 let db=load();
 let settings=loadSettings();
-let view='library', pending=null, attachImg=null, filter='All', query='', highlight=null, armed=null, thumbTarget=null, editing=null, notice=null;
+let view='library', pending=null, attachImg=null, attachBlob=null, filter='All', query='', highlight=null, armed=null, thumbTarget=null, editing=null, notice=null;
+const mediaBlobs={},objUrls={};   // gallery photos and videos (kept in IndexedDB)
+const mUrl=id=>objUrls[id]||(mediaBlobs[id]?(objUrls[id]=URL.createObjectURL(mediaBlobs[id])):'');
+const fmtSize=n=>n>=1048576?(n/1048576).toFixed(n>=10485760?0:1)+' MB':Math.max(1,Math.round(n/1024))+' KB';
 const thumbs={};            // post id -> JPEG data URL (kept in IndexedDB)
 const openEmbeds=new Set(); // post ids whose inline preview is open
 const busy=new Set();       // post ids waiting for a suggestion
@@ -125,14 +130,14 @@ function persistSettings(){try{localStorage.setItem(SKEY,JSON.stringify(settings
 const idb=(()=>{
   let p;
   const open=()=>p||(p=new Promise((res,rej)=>{
-    const r=indexedDB.open('saveshelf',1);
-    r.onupgradeneeded=()=>r.result.createObjectStore('thumbs');
+    const r=indexedDB.open('saveshelf',2);
+    r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains('thumbs'))d.createObjectStore('thumbs');if(!d.objectStoreNames.contains('media'))d.createObjectStore('media')};
     r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);
   }));
   return {
-    async put(k,v){const d=await open();return new Promise((res,rej)=>{const t=d.transaction('thumbs','readwrite');t.objectStore('thumbs').put(v,k);t.oncomplete=()=>res();t.onerror=()=>rej(t.error)})},
-    async del(k){const d=await open();return new Promise((res,rej)=>{const t=d.transaction('thumbs','readwrite');t.objectStore('thumbs').delete(k);t.oncomplete=()=>res();t.onerror=()=>rej(t.error)})},
-    async all(){const d=await open();return new Promise((res,rej)=>{const o={};const c=d.transaction('thumbs').objectStore('thumbs').openCursor();c.onsuccess=()=>{const cur=c.result;if(cur){o[cur.key]=cur.value;cur.continue()}else res(o)};c.onerror=()=>rej(c.error)})}
+    async put(k,v,st='thumbs'){const d=await open();return new Promise((res,rej)=>{const t=d.transaction(st,'readwrite');t.objectStore(st).put(v,k);t.oncomplete=()=>res();t.onerror=()=>rej(t.error)})},
+    async del(k,st='thumbs'){const d=await open();return new Promise((res,rej)=>{const t=d.transaction(st,'readwrite');t.objectStore(st).delete(k);t.oncomplete=()=>res();t.onerror=()=>rej(t.error)})},
+    async all(st='thumbs'){const d=await open();return new Promise((res,rej)=>{const o={};const c=d.transaction(st).objectStore(st).openCursor();c.onsuccess=()=>{const cur=c.result;if(cur){o[cur.key]=cur.value;cur.continue()}else res(o)};c.onerror=()=>rej(c.error)})}
   };
 })();
 function downscale(file,max=1000){
@@ -170,7 +175,7 @@ const fmtDate=iso=>{try{return new Date(iso).toLocaleDateString(undefined,{day:'
 const label=url=>{const m=url.match(/\/(p|reel|tv)\/([^/?#]+)/);if(m)return `${m[1]} · ${m[2]}`;try{return new URL(url).hostname}catch(e){return url}};
 const kindOf=url=>{const m=url.match(/\/(p|reel|tv)\//);return m?(m[1]==='p'?'Post':m[1]==='reel'?'Reel':'Video'):'Link'};
 const embedUrl=u=>{const m=u.match(/instagram\.com\/(p|reel|tv)\/([^/?#]+)/);return m?`https://www.instagram.com/${m[1]}/${m[2]}/embed/`:null};
-const nameOf=p=>p.title||label(p.url);
+const nameOf=p=>p.title||(p.kind==='media'?(p.mtype==='video'?'Video':'Photo'):label(p.url));
 const hasKey=()=>!!(settings.apiKey&&settings.apiKey.length>20);
 
 function findUrl(...parts){
@@ -279,8 +284,77 @@ category: the best match from this list: ${catList().join(', ')}.`;
   };
 }
 
+/* ---------- gallery photos and videos ---------- */
+function videoFrame(blob){
+  return new Promise((res,rej)=>{
+    const v=document.createElement('video'),u=URL.createObjectURL(blob);
+    const done=(f,x)=>{clearTimeout(tm);URL.revokeObjectURL(u);v.removeAttribute('src');f(x)};
+    const tm=setTimeout(()=>done(rej,new Error('timeout')),8000);
+    v.muted=true;v.playsInline=true;v.preload='auto';v.src=u;
+    v.onerror=()=>done(rej,new Error('video'));
+    v.onloadeddata=()=>{try{v.currentTime=Math.min(1,(v.duration||2)/2)}catch(e){done(rej,e)}};
+    v.onseeked=()=>{try{
+      const sc=Math.min(1,1000/Math.max(v.videoWidth,v.videoHeight)),c=document.createElement('canvas');
+      c.width=Math.max(1,Math.round(v.videoWidth*sc));c.height=Math.max(1,Math.round(v.videoHeight*sc));
+      c.getContext('2d').drawImage(v,0,0,c.width,c.height);done(res,c.toDataURL('image/jpeg',0.8));
+    }catch(e){done(rej,e)}};
+  });
+}
+function startMedia(blob){
+  const mtype=(blob.type||'').startsWith('video/')?'video':'image';
+  if(pending&&pending.objUrl)URL.revokeObjectURL(pending.objUrl);
+  pending={media:blob,mtype,mime:blob.type||'',size:blob.size,objUrl:URL.createObjectURL(blob),url:'',title:'',note:'',suggestCat:null};
+  setView('save');
+  if(hasKey()&&settings.auto)runMediaSuggest();
+}
+function renderSaveMedia(){
+  const m=pending;
+  app.innerHTML=`
+    <section class="card">
+      <div class="eyebrow">Save to your shelf · ${m.mtype==='video'?'Video':'Photo'} · ${fmtSize(m.size)}</div>
+      ${m.mtype==='video'?`<video class="mprev" src="${m.objUrl}" controls playsinline muted preload="metadata"></video>`:`<img class="mprev" src="${m.objUrl}" alt="Selected photo">`}
+      <label class="field"><span>Title (optional)</span>
+        <input id="title" maxlength="80" placeholder="e.g. Hip mobility routine" value="${esc(m.title)}"></label>
+      <label class="field"><span>Description (optional)</span>
+        <input id="note" maxlength="200" placeholder="What is it about?" value="${esc(m.note)}"></label>
+      <button type="button" class="ghost" id="mediaSuggest"${hasKey()?'':' hidden'}>Suggest title and description</button>
+      <div class="eyebrow" style="margin-top:14px">Choose a category</div>
+      <div class="cats">${catList().map(c=>`<button class="catbtn${m.suggestCat===c?' sug':''}" data-pick="${esc(c)}"><span class="dot" style="background:${colorFor(c)}"></span>${esc(c)}</button>`).join('')}</div>
+      <button class="ghost" id="cancel">Cancel</button>
+    </section>`;
+}
+async function runMediaSuggest(){
+  if(!pending||!pending.media||!hasKey())return;
+  const m=pending,btn=document.getElementById('mediaSuggest');
+  if(btn){btn.disabled=true;btn.textContent='Reading it…'}
+  try{
+    if(!m.frame)m.frame=m.mtype==='video'?await videoFrame(m.media):await downscale(m.media);
+    const s=await askMeta([{type:'image',source:{type:'base64',media_type:'image/jpeg',data:m.frame.split(',')[1]}}],'This is a photo, or a frame from a video, from someone\'s phone gallery');
+    if(pending!==m)return;
+    const t=document.getElementById('title'),n=document.getElementById('note');
+    if(t&&!t.value.trim())t.value=s.title;
+    if(n&&!n.value.trim())n.value=s.description;
+    m.suggestCat=s.category;
+    document.querySelectorAll('.catbtn').forEach(b=>b.classList.toggle('sug',!!s.category&&b.dataset.pick===s.category));
+  }catch(err){if(pending===m)toast(err&&err.code?errMsg(err):'Could not read this file to suggest a name')}
+  const b2=document.getElementById('mediaSuggest');
+  if(b2){b2.disabled=false;b2.textContent='Suggest title and description'}
+}
+async function commitMedia(cat){
+  const m=pending,id=uid();
+  const title=(document.getElementById('title')?.value||'').trim(),note=(document.getElementById('note')?.value||'').trim();
+  try{
+    await idb.put(id,m.media,'media');
+  }catch(e){toast('Could not store the file. Your phone storage may be full');return}
+  try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
+  mediaBlobs[id]=m.media;objUrls[id]=m.objUrl;
+  db.posts.unshift({id,url:'',kind:'media',mtype:m.mtype,mime:m.mime,size:m.size,cat,title,note,added:new Date().toISOString()});
+  highlight=id;persist();pending=null;filter=cat;toast(`Saved to ${cat}`);setView('library');
+}
+
 /* ---------- save screen (after a link is shared) ---------- */
 function renderSave(){
+  if(pending.media)return renderSaveMedia();
   const u=pending.url;
   app.innerHTML=`
     <section class="card">
@@ -373,17 +447,18 @@ async function runSuggestPending(){
 
 /* ---------- attach screen (after a screenshot is shared) ---------- */
 function renderAttach(){
-  const withoutImg=db.posts.filter(p=>!thumbs[p.id]);
-  const list=(withoutImg.length?withoutImg:db.posts).slice(0,8);
+  const withoutImg=db.posts.filter(p=>p.kind!=='media'&&!thumbs[p.id]);
+  const list=(withoutImg.length?withoutImg:db.posts.filter(p=>p.kind!=='media')).slice(0,8);
   app.innerHTML=`
     <section class="card">
       <div class="eyebrow">Screenshot received</div>
       <img class="attachimg" src="${attachImg}" alt="Shared screenshot">
-      ${db.posts.length?`
-        <h2 style="margin-top:16px">Attach it to</h2>
+      ${db.posts.some(p=>p.kind!=='media')?`
+        <button class="ghost" id="asItem" style="margin-top:12px">Save it as its own item</button>
+        <h2 style="margin-top:16px">Or attach it to a saved post</h2>
         <div class="attachlist">${list.map((p,i)=>`<button data-attach="${esc(p.id)}"><span>${esc(nameOf(p))}</span><span class="muted small">${i===0?'Latest · ':''}${esc(p.cat)}</span></button>`).join('')}</div>
         ${hasKey()&&settings.auto?'<p class="muted small">The title and description will be filled in automatically if they are empty.</p>':''}`
-      :`<p class="muted" style="margin:16px 0">There are no saved posts yet. Share an Instagram link to Save Shelf first, then share the screenshot.</p>`}
+      :`<p class="muted" style="margin:16px 0">There are no saved Instagram posts to attach it to.</p><button class="primary" id="asItem">Save it as its own item</button>`}
       <button class="ghost" id="cancel">Cancel</button>
     </section>`;
 }
@@ -413,7 +488,7 @@ function renderLibrary(){
       ${home?`<div class="eyebrow">${total} saved</div><h1>Save Shelf</h1>`
         :`<button class="ghost" data-filter="All" style="align-self:flex-start">‹ All categories</button><h1 style="display:flex;align-items:center;gap:10px"><span class="dot" style="background:${colorFor(filter)}"></span>${esc(filter)}</h1><div class="eyebrow">${counts[filter]||0} saved</div>`}
     </header>
-    ${notice?`<div class="notice" role="status"><span>${esc(notice.text)}</span><span class="row">${notice.undo?'<button class="ghost" data-undo="1">Undo</button>':''}<button class="ghost" data-dismiss="1">OK</button></span></div>`:''}
+    ${notice?`<div class="notice" role="status"><span>${esc(notice.text)}</span><span class="row">${notice.alt?'<button class="ghost" data-alt="1">Save as own item</button>':''}${notice.undo?'<button class="ghost" data-undo="1">Undo</button>':''}<button class="ghost" data-dismiss="1">OK</button></span></div>`:''}
 
     ${home?`<section class="card">
       <form id="addForm" class="row">
@@ -421,6 +496,7 @@ function renderLibrary(){
         <select id="addCat" aria-label="Category">${cats.map(c=>`<option>${esc(c)}</option>`).join('')}</select>
         <button class="primary" type="submit">Add</button>
       </form>
+      <label class="ghost" style="margin-top:10px">Add a photo or video from your gallery<input type="file" id="galleryFile" accept="image/*,video/*" hidden></label>
     </section>`:''}
 
     <input type="search" id="q" placeholder="${home?'Search all posts':'Search in '+esc(filter)}" value="${esc(query)}" aria-label="Search">
@@ -452,7 +528,7 @@ function renderLibrary(){
     </details>
 
     <section class="card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <span class="muted" style="flex:1 1 200px;font-size:13px">Your shelf and images are stored on this device. Export a backup to keep a copy.</span>
+      <span class="muted" style="flex:1 1 200px;font-size:13px">Your shelf is stored on this device. Export a backup to keep a copy. Photos and videos from your gallery stay on this device and are not in the backup.</span>
       <button class="ghost" id="exportBtn">Export backup</button>
       <button class="ghost" id="importBtn">Import backup</button>
       <input type="file" id="importFile" accept="application/json,.json" hidden>
@@ -470,7 +546,7 @@ function postCard(p,cats){
           <div class="pact"><button class="primary" type="submit">Save</button><button class="ghost" type="button" data-edit-cancel="1">Cancel</button></div>
         </form>`:`
         <div class="pmain">
-          <div class="ptop"><a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(label(p.url))}</a><time>${fmtDate(p.added)}</time></div>
+          <div class="ptop">${p.kind==='media'?`<span>${p.mtype==='video'?'Video':'Photo'} · ${fmtSize(p.size||0)}</span>`:`<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(label(p.url))}</a>`}<time>${fmtDate(p.added)}</time></div>
           ${p.title?`<p class="ptitle">${esc(p.title)}</p>`:''}
           <p class="note${p.note?'':' muted'}">${esc(p.note||(p.title?'':'No title or description yet'))}</p>
         </div>`;
@@ -484,6 +560,7 @@ function postCard(p,cats){
         <button class="ghost" data-edit="${esc(p.id)}">Edit</button>
                 <button class="ghost danger" data-del="${esc(p.id)}">${armed===p.id?'Tap again to delete':'Delete'}</button>
       </div>
+      ${p.kind==='media'?(mUrl(p.id)?`<div class="embed">${p.mtype==='video'?`<video class="mprev" src="${mUrl(p.id)}" controls playsinline preload="metadata"></video>`:`<img class="mprev" src="${mUrl(p.id)}" alt="${esc(nameOf(p))}" loading="lazy">`}</div>`:'<span class="muted small">Loading…</span>'):''}
       ${emb?`<div class="embed"><iframe src="${esc(emb)}" loading="lazy" title="Instagram preview" allowtransparency="true"></iframe>
         <span class="muted small">Nothing showing? The post may be private, or your browser may block the preview. <a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open it on Instagram</a>.</span></div>`:''}
     </article>`;
@@ -511,6 +588,7 @@ function renderList(){
 
 /* ---------- actions ---------- */
 function commit(cat){
+  if(pending.media){commitMedia(cat);return}
   const title=(document.getElementById('title')?.value||'').trim();
   const note=(document.getElementById('note')?.value||'').trim();
   const ex=db.posts.find(p=>p.url===pending.url);
@@ -534,7 +612,7 @@ function addLink(raw,cat){
 }
 
 // Attaches a shared screenshot to a post, names it, and files it if it was left uncategorised.
-async function autoAttach(post,img){
+async function autoAttach(post,img,blob){
   const before={title:post.title||'',note:post.note||'',cat:post.cat,prevThumb:thumbs[post.id]||null};
   keepThumb(post.id,img);
   let text;
@@ -551,7 +629,7 @@ async function autoAttach(post,img){
     if(before.prevThumb)keepThumb(post.id,before.prevThumb);
     else{delete thumbs[post.id];idb.del(post.id).catch(()=>{})}
     persist();
-  }};
+  },alt:blob?()=>startMedia(blob):null};
 }
 
 async function suggestForPost(id){
@@ -571,25 +649,30 @@ async function init(){
   const q=new URLSearchParams(location.search);
   const title=q.get('title')||'';
   const found=findUrl(q.get('url'),q.get('text'),title);
-  const thumbsReady=idb.all().then(o=>{Object.assign(thumbs,o)}).catch(()=>{});
+  const thumbsReady=Promise.all([idb.all(),idb.all('media')]).then(([o,m])=>{Object.assign(thumbs,o);Object.assign(mediaBlobs,m)}).catch(()=>{});
   let shared=null;
-  if(q.get('shared')==='image'){
-    const blob=await takeSharedImage();
-    if(blob){try{shared=await downscale(blob)}catch(e){toast('Could not read the shared image')}}
+  let sharedBlob=null;
+  if(q.get('shared')==='image'||q.get('shared')==='video'){
+    sharedBlob=await takeSharedImage();
+    if(sharedBlob&&!(sharedBlob.type||'').startsWith('video/')){try{shared=await downscale(sharedBlob)}catch(e){toast('Could not read the shared image')}}
   }
   if(found){
     const note=(title||q.get('text')||'').replace(ANYURL,'').replace(/\s+/g,' ').trim().slice(0,140);
     pending={url:found,title:'',note,thumb:shared,suggestCat:null};view='save';
+  }else if(sharedBlob&&(sharedBlob.type||'').startsWith('video/')){
+    try{history.replaceState(null,'',location.pathname)}catch(e){}
+    await thumbsReady;
+    startMedia(sharedBlob);return;
   }else if(shared){
     try{history.replaceState(null,'',location.pathname)}catch(e){}
     await thumbsReady;
     // A screenshot that arrives soon after a link was saved belongs to that post.
-    const recent=db.posts.find(p=>!thumbs[p.id]&&Date.now()-Date.parse(p.added)<3600000);
+    const recent=db.posts.find(p=>p.kind!=='media'&&!thumbs[p.id]&&Date.now()-Date.parse(p.added)<600000);
     if(recent&&hasKey()&&settings.auto){
       app.innerHTML='<section class="card"><div class="eyebrow">Screenshot received</div><p>Reading the screenshot…</p></section>';
-      await autoAttach(recent,shared);
+      await autoAttach(recent,shared,sharedBlob);
       view='library';
-    }else{attachImg=shared;view='attach'}
+    }else{attachImg=shared;attachBlob=sharedBlob;view='attach'}
   }else if(q.toString()){
     toast('No link or image found in what you shared');
   }
@@ -603,7 +686,10 @@ async function init(){
 document.addEventListener('click',e=>{
   const t=e.target.closest('button');if(!t)return;
   if(t.dataset.pick){commit(t.dataset.pick);return}
-  if(t.id==='cancel'){pending=null;attachImg=null;setView('library');return}
+  if(t.id==='cancel'){if(pending&&pending.objUrl)URL.revokeObjectURL(pending.objUrl);pending=null;attachImg=null;attachBlob=null;setView('library');return}
+  if(t.id==='mediaSuggest'){runMediaSuggest();return}
+  if(t.id==='asItem'){const b=attachBlob;attachImg=null;attachBlob=null;if(b)startMedia(b);return}
+  if(t.dataset.alt){if(notice&&notice.undo)notice.undo();const a=notice&&notice.alt;notice=null;if(a)a();return}
   if(t.id==='suggestBtn'){runSuggestPending();return}
   if(t.id==='capBtn'){runCaption();return}
   if(t.id==='pasteCap'){
@@ -629,7 +715,7 @@ document.addEventListener('click',e=>{
   if(t.dataset.del){
     const id=t.dataset.del;
     if(armed===id){
-      db.posts=db.posts.filter(p=>p.id!==id);delete thumbs[id];openEmbeds.delete(id);idb.del(id).catch(()=>{});
+      db.posts=db.posts.filter(p=>p.id!==id);delete thumbs[id];delete mediaBlobs[id];if(objUrls[id]){URL.revokeObjectURL(objUrls[id]);delete objUrls[id]}idb.del(id,'media').catch(()=>{});openEmbeds.delete(id);idb.del(id).catch(()=>{});
       armed=null;persist();toast('Deleted');renderAll();
     }else{armed=id;renderList();setTimeout(()=>{if(armed===id){armed=null;renderList()}},4000)}
     return;
@@ -641,7 +727,7 @@ document.addEventListener('click',e=>{
   }
   if(t.id==='clearKey'){settings.apiKey='';persistSettings();toast('Key removed');renderAll();return}
   if(t.id==='exportBtn'){
-    const blob=new Blob([JSON.stringify({...db,thumbs},null,2)],{type:'application/json'});
+    const blob=new Blob([JSON.stringify({...db,posts:db.posts.filter(p=>p.kind!=='media'),thumbs},null,2)],{type:'application/json'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='saveshelf-backup.json';document.body.appendChild(a);a.click();a.remove();
     return;
   }
@@ -681,6 +767,7 @@ document.addEventListener('change',async e=>{
     if(p){p.cat=el.value;persist();toast(`Moved to ${p.cat}`);renderAll()}
     return;
   }
+  if(el.id==='galleryFile'){const f=el.files&&el.files[0];el.value='';if(f)startMedia(f);return}
   if(el.id==='autoSuggest'){settings.auto=el.checked;persistSettings();return}
   if(el.id==='readLinkChk'){settings.readLink=el.checked;persistSettings();return}
   if(el.id==='thumbFile'){

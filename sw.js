@@ -1,4 +1,4 @@
-const CACHE = 'saveshelf-v8';
+const CACHE = 'saveshelf-v9';
 const SHARE_CACHE = 'saveshelf-share';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
@@ -29,7 +29,7 @@ async function handleShare(request) {
     if (file) {
       const cache = await caches.open(SHARE_CACHE);
       await cache.put('shared-image', new Response(file, { headers: { 'Content-Type': file.type || 'image/jpeg' } }));
-      params.set('shared', 'image');
+      params.set('shared', (file.type || '').startsWith('video/') ? 'video' : 'image');
     }
     home.search = params.toString();
   } catch (err) {
