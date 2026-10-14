@@ -55,6 +55,10 @@ button.primary{background:var(--accent);color:var(--accent-ink);border:0;border-
 .pact{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .pact select{width:auto;flex:1 1 130px;padding:7px 10px;font-size:13px}
 .embed{display:flex;flex-direction:column;gap:6px}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tile{border:1px solid var(--line);border-top:4px solid var(--c);background:var(--surface);color:var(--ink);border-radius:14px;padding:14px;font:inherit;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:4px;min-height:96px}
+.tile strong{font-size:17px}
+.tl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .embed iframe{width:100%;height:540px;border:0;border-radius:10px;background:var(--sunk)}
 .empty{color:var(--muted);text-align:center;padding:32px 12px;border:1px dashed var(--line);border-radius:14px}
 .cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:14px 0}
@@ -93,7 +97,7 @@ const SKEY='saveshelf.settings.v1';
 const DEFAULT_CATS=['Workout','Mobility','Recipe','Travel','Inspiration'];
 const UNC='Uncategorized';
 const MODEL='claude-haiku-5-5';
-const APP_VERSION='7 · 14 Oct 2026';
+const APP_VERSION='8 · 14 Oct 2026';
 const IG=/https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[^\/\s?#]+\/)?(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i;
 const ANYURL=/https?:\/\/[^\s]+/;
 
@@ -397,43 +401,34 @@ async function attachTo(id){
       toast('Image added and named');
     }catch(err){toast('Image added. '+errMsg(err))}
   }else toast('Image added');
-  persist();attachImg=null;highlight=id;filter='All';setView('library');
+  persist();attachImg=null;highlight=id;filter=(db.posts.find(x=>x.id===id)||{}).cat||'All';setView('library');
 }
 
 /* ---------- library ---------- */
 function renderLibrary(){
   const cats=catList(),counts=countBy(),total=db.posts.length;
-  const used=cats.filter(c=>counts[c]);
+  const home=filter==='All';
   app.innerHTML=`
     <header>
-      <div class="eyebrow">${total} saved</div>
-      <h1>Save Shelf</h1>
+      ${home?`<div class="eyebrow">${total} saved</div><h1>Save Shelf</h1>`
+        :`<button class="ghost" data-filter="All" style="align-self:flex-start">‹ All categories</button><h1 style="display:flex;align-items:center;gap:10px"><span class="dot" style="background:${colorFor(filter)}"></span>${esc(filter)}</h1><div class="eyebrow">${counts[filter]||0} saved</div>`}
     </header>
     ${notice?`<div class="notice" role="status"><span>${esc(notice.text)}</span><span class="row">${notice.undo?'<button class="ghost" data-undo="1">Undo</button>':''}<button class="ghost" data-dismiss="1">OK</button></span></div>`:''}
 
-    <section class="card">
-      <h2>By category</h2>
-      ${total?`<div class="bar" role="img" aria-label="Posts per category">${used.map(c=>`<span style="flex:${counts[c]};background:${colorFor(c)}" title="${esc(c)}: ${counts[c]}"></span>`).join('')}</div>`:''}
-      <div class="chips">
-        <button class="chip" data-filter="All" aria-pressed="${filter==='All'}">All <span class="muted">${total}</span></button>
-        ${cats.map(c=>`<button class="chip" data-filter="${esc(c)}" aria-pressed="${filter===c}"><span class="dot" style="background:${colorFor(c)}"></span>${esc(c)} <span class="muted">${counts[c]||0}</span></button>`).join('')}
-      </div>
-    </section>
-
-    <section class="card">
+    ${home?`<section class="card">
       <form id="addForm" class="row">
         <input id="addUrl" type="url" inputmode="url" placeholder="Paste an Instagram link" aria-label="Instagram link">
         <select id="addCat" aria-label="Category">${cats.map(c=>`<option>${esc(c)}</option>`).join('')}</select>
         <button class="primary" type="submit">Add</button>
       </form>
-    </section>
+    </section>`:''}
 
-    <input type="search" id="q" placeholder="Search titles, descriptions, categories or links" value="${esc(query)}" aria-label="Search">
+    <input type="search" id="q" placeholder="${home?'Search all posts':'Search in '+esc(filter)}" value="${esc(query)}" aria-label="Search">
 
     <div id="list"></div>
     <input type="file" id="thumbFile" accept="image/*" hidden>
 
-    <details class="card">
+    ${home?`<details class="card">
       <summary>Smart naming (optional)</summary>
       <p class="muted small">Reads a screenshot and suggests a title, a short description and a category. It uses your own Anthropic API key, which stays in this browser only. Screenshots and links are sent to Anthropic when you use it. Create a key with a low spending limit at console.anthropic.com.</p>
       <form id="keyForm" class="row">
@@ -462,7 +457,7 @@ function renderLibrary(){
       <button class="ghost" id="importBtn">Import backup</button>
       <input type="file" id="importFile" accept="application/json,.json" hidden>
     </section>
-    <p class="muted small" style="text-align:center;margin:0">Save Shelf version ${APP_VERSION}</p>`;
+    <p class="muted small" style="text-align:center;margin:0">Save Shelf version ${APP_VERSION}</p>`:''}`;
   renderList();
 }
 
@@ -482,20 +477,15 @@ function postCard(p,cats){
   return `
     <article class="post${highlight===p.id?' hl':''}">
       <div class="prow">
-        <button class="thumb" data-preview="${esc(p.id)}" aria-label="${open?'Hide':'Show'} preview"${emb?'':' disabled'}>${img?`<img src="${img}" alt="">`:`<span style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;background:color-mix(in srgb,${col} 22%,var(--sunk))">${esc(kindOf(p.url))}</span>`}</button>
         ${body}
       </div>
       <div class="pact">
         <select data-move="${esc(p.id)}" aria-label="Move to category">${cats.map(c=>`<option${c===p.cat?' selected':''}>${esc(c)}</option>`).join('')}</select>
-        ${emb?`<button class="ghost" data-preview="${esc(p.id)}">${open?'Hide preview':'Preview'}</button>`:''}
-        <button class="ghost" data-addimg="${esc(p.id)}">${img?'Change image':'Add image'}</button>
         <button class="ghost" data-edit="${esc(p.id)}">Edit</button>
-        ${img&&hasKey()&&(!p.title||!p.note)?`<button class="ghost" data-suggest="${esc(p.id)}"${busy.has(p.id)?' disabled':''}>${busy.has(p.id)?'Reading…':'Suggest name'}</button>`:''}
-        <button class="ghost danger" data-del="${esc(p.id)}">${armed===p.id?'Tap again to delete':'Delete'}</button>
+                <button class="ghost danger" data-del="${esc(p.id)}">${armed===p.id?'Tap again to delete':'Delete'}</button>
       </div>
-      ${open&&emb?`<div class="embed"><iframe src="${esc(emb)}" loading="lazy" title="Instagram preview" allowtransparency="true"></iframe>
-        <span class="muted small">Nothing showing? The post may be private, or your browser may block the preview. <a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open it on Instagram</a>.</span>
-        <span class="muted small">To add a picture: take a screenshot of this preview, then share it to Save Shelf.</span></div>`:''}
+      ${emb?`<div class="embed"><iframe src="${esc(emb)}" loading="lazy" title="Instagram preview" allowtransparency="true"></iframe>
+        <span class="muted small">Nothing showing? The post may be private, or your browser may block the preview. <a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open it on Instagram</a>.</span></div>`:''}
     </article>`;
 }
 
@@ -506,9 +496,14 @@ function renderList(){
   if(!db.posts.length){el.innerHTML=`<div class="empty">Nothing saved yet.<br>Share an Instagram post to Save Shelf, or paste a link above.</div>`;return}
   if(!list.length){el.innerHTML=`<div class="empty">No posts match.</div>`;return}
   if(filter==='All'&&!q){
-    el.innerHTML=`<div class="group">${cats.filter(c=>list.some(p=>p.cat===c)).map(c=>`
-      <div class="group"><h2><span class="dot" style="background:${colorFor(c)}"></span>${esc(c)} · ${list.filter(p=>p.cat===c).length}</h2>
-        <div class="posts">${list.filter(p=>p.cat===c).map(p=>postCard(p,cats)).join('')}</div></div>`).join('')}</div>`;
+    const counts=countBy();
+    el.innerHTML=`<div class="tiles">${cats.map(c=>{const last=db.posts.find(p=>p.cat===c&&p.title);return `
+      <button class="tile" data-filter="${esc(c)}" style="--c:${colorFor(c)}">
+        <span class="dot" style="background:${colorFor(c)}"></span>
+        <strong>${esc(c)}</strong>
+        <span class="muted">${counts[c]||0} saved</span>
+        ${last?`<span class="muted small tl">${esc(last.title)}</span>`:''}
+      </button>`}).join('')}</div>`;
   }else{
     el.innerHTML=`<div class="posts">${list.map(p=>postCard(p,cats)).join('')}</div>`;
   }
@@ -526,7 +521,7 @@ function commit(cat){
     toast(hasKey()&&settings.auto&&!pending.thumb?`Saved to ${cat}. Share a screenshot of the post to add its picture and name.`:`Saved to ${cat}`);
   }
   if(pending.thumb)keepThumb(id,pending.thumb);
-  highlight=id;persist();pending=null;filter='All';setView('library');
+  highlight=id;persist();pending=null;filter=cat;setView('library');
 }
 
 function addLink(raw,cat){
@@ -550,7 +545,7 @@ async function autoAttach(post,img){
     if(post.cat===UNC&&s.category)post.cat=s.category;
     text=`Added the picture and named it “${nameOf(post)}”`+(post.cat!==before.cat?`, filed under ${post.cat}`:'');
   }catch(err){text='Picture added. '+errMsg(err)}
-  persist();highlight=post.id;filter='All';
+  persist();highlight=post.id;filter=post.cat;
   notice={text,undo:()=>{
     post.title=before.title;post.note=before.note;post.cat=before.cat;
     if(before.prevThumb)keepThumb(post.id,before.prevThumb);
@@ -658,7 +653,7 @@ document.addEventListener('submit',e=>{
   const f=e.target;
   if(f.id==='addForm'){
     const url=document.getElementById('addUrl').value,cat=document.getElementById('addCat').value;
-    if(addLink(url,cat)){filter='All';renderAll()}
+    if(addLink(url,cat)){filter=cat;renderAll()}
   }
   if(f.id==='newCat'){
     const name=document.getElementById('catName').value.trim();
